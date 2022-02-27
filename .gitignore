@@ -1,0 +1,13 @@
+/lib
+/backup
+/locale
+/logs
+consopool
+consopool.cfg
+consopool.exe
+consopool.dbg
+gitinst.txt
+*.res
+*.lps
+*.mo
+
