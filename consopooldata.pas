@@ -19,8 +19,13 @@ Procedure LoadConfig();
 Function UpdateScreen():Boolean;
 Procedure SetUpdateScreen();
 Procedure InitServer();
+function CheckIPMiners(UserIP:String):Boolean;
+Function TryMessageToMiner(AContext: TIdContext;message:string):boolean;
+Procedure TryClosePoolConnection(AContext: TIdContext; closemsg:string='');
 Function StartPool():String;
 Function StopPool():String;
+Procedure ToLog(Texto:string);
+Procedure ResetBlock();
 Function GetPrefixIndex():Integer;
 Procedure ResetPrefixIndex();
 function GetPrefixStr():string;
@@ -45,9 +50,12 @@ VAR
   LastHelpShown: String = '';
   FinishProgram: Boolean = false;
   OnMainScreen : Boolean = True;
+  OnLogScreen  : Boolean = false;
     RefreshScreen : Boolean = true;
     RefreshAge    : Int64 = 0;
     UpdateServerInfo : boolean = false;
+  LogLines     : Array of String;
+  NewLogLines  : Array of string;
   // Mainnet
   LastConsensusTry: int64   = 0;
   WaitingConsensus:Boolean = false;
@@ -55,10 +63,13 @@ VAR
   PoolServer : TIdTCPServer;
   PrefixIndex: Integer = 0;
   MinerDiff  : String = '';
+  IPMiners: integer = 100;
 
   // Critical sections
   CS_UpdateScreen : TRTLCriticalSection;
   CS_PrefixIndex  : TRTLCriticalSection;
+  CS_NewLogLines  : TRTLCriticalSection;
+  CS_LogLines     : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -105,7 +116,7 @@ writeln(configfile,'poolport '+IntToStr(PoolPort));
 writeln(configfile,'diffbase '+MinDiffBase);
 writeln(configfile,'poolfee '+IntToStr(PoolFee));
 writeln(configfile,'poolpay '+IntToStr(PoolPay));
-writeln(configfile,'pooladdress '+PoolAddress);
+writeln(configfile,'ipminers '+IntToStr(IPMiners));
 CloseFile(configfile);
 EXCEPT ON E:EXCEPTION do
    begin
@@ -135,6 +146,7 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'POOLFEE' then PoolFee := StrToIntDef(Parameter(linea,1),PoolFee);
    if uppercase(Parameter(linea,0)) = 'POOLPAY' then PoolPay := StrToIntDef(Parameter(linea,1),PoolPay);
    if uppercase(Parameter(linea,0)) = 'POOLADDRESS' then PoolAddress := Parameter(linea,1);
+   if uppercase(Parameter(linea,0)) = 'IPMINERS' then IPMiners := StrToIntDef(Parameter(linea,1),IPMiners);
    end;
 EXCEPT ON E:EXCEPTION do
    begin
@@ -192,6 +204,8 @@ PoolServer.Bindings.Clear;
 PoolServer.DefaultPort:=PoolPort;
 PoolServer.Active:=true;
 Success := true;
+MinerDiff := AddCharR('F',MinDiffBase,32);
+ResetBlock();
 EXCEPT ON E:Exception do
    Result := E.Message;
 END; {TRY}
@@ -224,10 +238,21 @@ If success then
    end;
 End;
 
+Procedure ToLog(Texto:string);
+Begin
+Texto := DateTimeToStr(now)+' '+Texto;
+EnterCriticalSection(CS_NewLogLines);
+Insert(Texto,NewLogLines,Length(NewLogLines));
+LeaveCriticalSection(CS_NewLogLines);
+EnterCriticalSection(CS_LogLines);
+Insert(Texto,LogLines,Length(LogLines));
+LeaveCriticalSection(CS_LogLines);
+if OnLogScreen then WriteLn(Texto);
+End;
+
 Procedure ResetBlock();
 Begin
 ResetPrefixIndex();
-MinerDiff := AddCharR('F',MinDiffBase,32);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -259,9 +284,44 @@ ThirdChar := Index mod HashChars;
 result := HasheableChars[firstchar+1]+HasheableChars[secondchar+1]+HasheableChars[ThirdChar+1];
 End;
 
+function CheckIPMiners(UserIP:String):Boolean;
+Begin
+result := true;
+End;
+
+// Try to send a message safely
+Function TryMessageToMiner(AContext: TIdContext;message:string):boolean;
+Begin
+result := true;
+//PoolServer.Contexts.LockList;
+TRY
+Acontext.Connection.IOHandler.WriteLn(message);
+EXCEPT on E:Exception do
+   begin
+   ToLog('Error sending message to miner: '+E.Message);
+   end;
+END;{Try}
+End;
+
+// Try to close a pool connection safely
+Procedure TryClosePoolConnection(AContext: TIdContext; closemsg:string='');
+Begin
+if closemsg <>'' then
+   begin
+   TryMessageToMiner(AContext,closemsg);
+   end;
+TRY
+Acontext.Connection.IOHandler.InputBuffer.Clear;
+AContext.Connection.Disconnect;
+AContext.Connection.IOHandler.DiscardAll(); // ?? is valid
+EXCEPT on E:Exception do
+   ToLog('Error closing miner conneciton: '+E.Message);
+END;{Try}
+End;
+
 Class Procedure PoolServerEvents.OnExecute(AContext: TIdContext);
 Begin
-
+// Probably unnecessary
 End;
 
 Class Procedure PoolServerEvents.OnConnect(AContext: TIdContext);
@@ -281,10 +341,14 @@ EXCEPT On E:Exception do
    END{Try};
    end;
 END{Try};
-Command := Parameter(Linea,1);
+Command := Parameter(Linea,0);
+Address := Parameter(Linea,1);
 If UpperCase(Command) = 'SOURCE' then
    Begin
-
+   if CheckIPMiners(IPUser) then
+      begin
+      TryClosePoolConnection(AContext,GetPrefixStr+' '+MinerDiff{+' '+GetAddressBalance(Address)});
+      end;
    End;
 
 

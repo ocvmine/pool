@@ -89,9 +89,15 @@ PrintLine(1);WriteLn();
 TextBackground(Black);TextColor(White);
 WriteLn();
 WriteLn('Available commands (case unsensitive): ');
+WriteLn('[Shortcut key]');
 WriteLn();
-Writeln('help                   -> Shows this info');
-Writeln('exit                   -> Close the app');
+Writeln('help    [F1]           -> Shows this info');
+Writeln('nodes   [F2]           -> Shows the seed nodes');
+Writeln('sync    [F3]           -> Syncs with mainnet (Debug)');
+Writeln('log     [F4]           -> Shows the session log');
+Writeln('run     [F5]           -> Starts the pool');
+Writeln('stop    [F6]           -> Stops the pool');
+Writeln('exit    [ESC]          -> Close the app');
 WriteLn();Write('Press any key to return');
 ThisChar := ReadKey;
 If ThisChar = #0 then ThisChar := Readkey;
@@ -130,6 +136,36 @@ LastHelpShown := DefHelpLine;
 SetUpdateScreen();
 End;
 
+Procedure ShowLog();
+Var
+  Counter : Integer;
+Begin
+OnMainScreen := false;
+OnLogScreen := true;
+TextBackground(Black);TextColor(White);ClrScr();
+PrintLine(1);WriteLn();
+TextBackground(Black);TextColor(White);
+WriteLn();
+WriteLn('Session log: ');
+WriteLn();
+
+EnterCriticalSection(CS_LogLines);
+For counter := 0 to length(LogLines)-1 do
+   begin
+   writeln(LogLines[counter]);
+   end;
+LeaveCriticalSection(CS_LogLines);
+//WriteLn();
+//Write('Press any key to return');
+ThisChar := ReadKey;
+If ThisChar = #0 then ThisChar := Readkey;
+ClrScr();
+OnMainScreen := true;
+OnLogScreen := False;
+LastHelpShown := DefHelpLine;
+SetUpdateScreen();
+End;
+
 Procedure PrintUpdateScreen();
 Begin
 PrintLine(1);
@@ -144,6 +180,10 @@ End;
 BEGIN
 InitCriticalSection(CS_UpdateScreen);
 InitCriticalSection(CS_PrefixIndex);
+InitCriticalSection(CS_LogLines);
+InitCriticalSection(CS_NewLogLines);
+SetLength(LogLines,0);
+SetLength(NewLogLines,0);
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
 Assignfile(configfile, 'consopool.cfg');
@@ -160,6 +200,7 @@ LoadNodes;
 InitServer;
 MainConsensus := Default(TNodeData);
 LastHelpShown := DefHelpLine;
+ToLog('********** New Session **********');
 REPEAT
    REPEAT
       if UpdateScreen then PrintUpdateScreen();
@@ -199,6 +240,11 @@ REPEAT
          Command := 'sync';
          ThisChar := #13;
          end;
+      if ThisChar=#62 then // F4
+         begin
+         Command := 'log';
+         ThisChar := #13;
+         end;
       end;
    if ((Ord(ThisChar)>=32) and (Ord(ThisChar)<=126)) then
       begin
@@ -215,6 +261,7 @@ REPEAT
       if Uppercase(Parameter(Command,0)) = 'EXIT' then FinishProgram := true
       else if Uppercase(Parameter(Command,0)) = 'HELP' then ShowHelp
       else if Uppercase(Parameter(Command,0)) = 'NODES' then ShowNodes
+      else if Uppercase(Parameter(Command,0)) = 'LOG' then ShowLog
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(11,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(11,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SYNC' then
@@ -232,7 +279,11 @@ REPEAT
       end
    else if Ord(ThisChar) = 27 then FinishProgram := true;
 UNTIL FinishProgram;
+writeln();
+PoolServer.Free;
 DoneCriticalSection(CS_UpdateScreen);
 DoneCriticalSection(CS_PrefixIndex);
+DoneCriticalSection(CS_LogLines);
+DoneCriticalSection(CS_NewLogLines);
 END.
 
