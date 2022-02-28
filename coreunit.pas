@@ -5,7 +5,7 @@ UNIT coreunit;
 INTERFACE
 
 USES
-  Classes, SysUtils, dateutils, IdTCPClient, IdGlobal;
+  Classes, SysUtils, dateutils, IdTCPClient, IdGlobal, MD5;
 
 TYPE
 
@@ -45,6 +45,8 @@ Function GetConsensus():Boolean;
 Procedure LoadNodes();
 Function GetNodeIndex(Index:integer):TNodeData;
 Procedure CloseSyncingThread();
+Function NosoHash(source:string):string;
+Function HashMD5String(StringToHash:String):String;
 
 CONST
   HasheableChars = '!"#$%&'')*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
@@ -224,7 +226,7 @@ var
 Begin
 Result := False;
 ContactedNodes := 0;
-SyncingThreads := length(NodesArray)-1;
+SyncingThreads := length(NodesArray);
 For Counter := 0 to length(NodesArray)-1 do
    begin
    ThisNode := GetNodeIndex(Counter);
@@ -236,7 +238,6 @@ For Counter := 0 to length(NodesArray)-1 do
 REPEAT
    sleep(1);
 UNTIL SyncingThreads <= 0;
-Sleep(10);
 If ContactedNodes>=(length(NodesArray) div 2)+1 then
    begin
    Result := true;
@@ -303,6 +304,78 @@ EnterCriticalSection(CS_CSThread);
 Dec(SyncingThreads);
 LeaveCriticalSection(CS_CSThread);
 End;
+
+Function NosoHash(source:string):string;
+var
+  counter : integer;
+  FirstChange : array[1..128] of string;
+  finalHASH : string;
+  ThisSum : integer;
+  charA,charB,charC,charD:integer;
+  Filler : string = '%)+/5;=CGIOSYaegk';
+
+  Function GetClean(number:integer):integer;
+  Begin
+  result := number;
+  if result > 126 then
+     begin
+     repeat
+       result := result-95;
+     until result <= 126;
+     end;
+  End;
+
+  function RebuildHash(incoming : string):string;
+  var
+    counter : integer;
+    resultado2 : string = '';
+    chara,charb, charf : integer;
+  Begin
+  for counter := 1 to length(incoming) do
+     begin
+     chara := Ord(incoming[counter]);
+       if counter < Length(incoming) then charb := Ord(incoming[counter+1])
+       else charb := Ord(incoming[1]);
+     charf := chara+charb; CharF := GetClean(CharF);
+     resultado2 := resultado2+chr(charf);
+     end;
+  result := resultado2
+  End;
+
+Begin
+result := '';
+for counter := 1 to length(source) do
+   if ((Ord(source[counter])>126) or (Ord(source[counter])<33)) then
+      begin
+      source := '';
+      break
+      end;
+if length(source)>63 then source := '';
+repeat source := source+filler;
+until length(source) >= 128;
+source := copy(source,0,128);
+FirstChange[1] := RebuildHash(source);
+for counter := 2 to 128 do FirstChange[counter]:= RebuildHash(firstchange[counter-1]);
+finalHASH := FirstChange[128];
+for counter := 0 to 31 do
+   begin
+   charA := Ord(finalHASH[(counter*4)+1]);
+   charB := Ord(finalHASH[(counter*4)+2]);
+   charC := Ord(finalHASH[(counter*4)+3]);
+   charD := Ord(finalHASH[(counter*4)+4]);
+   thisSum := CharA+charB+charC+charD;
+   ThisSum := GetClean(ThisSum);
+   Thissum := ThisSum mod 16;
+   result := result+IntToHex(ThisSum,1);
+   end;
+Result := HashMD5String(Result);
+End;
+
+Function HashMD5String(StringToHash:String):String;
+Begin
+result := Uppercase(MD5Print(MD5String(StringToHash)));
+end;
+
 
 INITIALIZATION
 InitCriticalSection(CS_NodesArray);

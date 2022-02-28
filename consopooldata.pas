@@ -13,6 +13,20 @@ Type
     class procedure OnConnect(AContext: TIdContext);
   end;
 
+  TMinersData = Packed Record
+    address : string[40];
+    Balance : int64;
+    LastPay : integer;
+    end;
+
+Procedure CreateMinersFile();
+Procedure LoadMiners();
+Function MinersCount():integer;
+Function GetMinerBalance(address:string):int64;
+
+Function ShareAlreadyExists(Share:string):boolean;
+Function ShareIsValid(Share,Address:String):Boolean;
+
 Function ResetLogs():boolean;
 function SaveConfig():boolean;
 Procedure LoadConfig();
@@ -38,6 +52,7 @@ CONST
 VAR
   // Files
   configfile, LogFile, OldLogFile : TextFile;
+  MinersFile : File of TMinersData;
   // Config values
   PoolPort     : integer = 8082;
   MinDiffBase  : string  = '00000';
@@ -64,14 +79,98 @@ VAR
   PrefixIndex: Integer = 0;
   MinerDiff  : String = '';
   IPMiners: integer = 100;
+  ArrMiners : Array of TMinersData;
+  ArrShares : Array of string;
 
   // Critical sections
   CS_UpdateScreen : TRTLCriticalSection;
   CS_PrefixIndex  : TRTLCriticalSection;
   CS_NewLogLines  : TRTLCriticalSection;
   CS_LogLines     : TRTLCriticalSection;
+  CS_Miners       : TRTLCriticalSection;
+  CS_Shares       : TRTLCriticalSection;
 
 IMPLEMENTATION
+
+Procedure CreateMinersFile();
+Begin
+TRY
+rewrite(MinersFile);
+CloseFile(MinersFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   writeln('Error creating miners file');
+   Halt(1);
+   end;
+END {TRY};
+End;
+
+Procedure LoadMiners();
+var
+  ThisData : TMinersData;
+Begin
+reset(MinersFile);
+While not eof(MinersFile) do
+   begin
+   read(MinersFile,ThisData);
+   Insert(ThisData,ArrMiners,Length(ArrMiners));
+   end;
+CloseFile(MinersFile);
+End;
+
+Function MinersCount():Integer;
+Begin
+EnterCriticalSection(CS_Miners);
+Result := Length(ArrMiners);
+LeaveCriticalSection(CS_Miners);
+End;
+
+Function GetMinerBalance(address:string):int64;
+var
+  counter : integer;
+Begin
+Result := 0;
+EnterCriticalSection(CS_Miners);
+for counter := 0 to length(ArrMiners)-1 do
+   begin
+   if ArrMiners[counter].address = address then
+      begin
+      result := ArrMiners[counter].Balance;
+      break;
+      end;
+   end;
+LeaveCriticalSection(CS_Miners);
+End;
+
+
+Function ShareAlreadyExists(Share:string):boolean;
+var
+  counter : integer;
+Begin
+Result := false;
+EnterCriticalSection(CS_Shares);
+For counter := 0 to length(ArrShares)-1 do
+   begin
+   if ArrShares[counter] = Share then
+      begin
+      result := true;
+      break
+      end;
+   end;
+LeaveCriticalSection(CS_Shares);
+End;
+
+Function ShareIsValid(Share,Address:String):Boolean;
+var
+  ThisHash : string;
+Begin
+Result := true;
+if ShareAlreadyExists(Share+address) then Result := false
+else
+   begin
+   ThisHash := NosoHash(Share+Address);
+   end;
+End;
 
 // Prepare logs files
 Function ResetLogs():boolean;
@@ -253,6 +352,7 @@ End;
 Procedure ResetBlock();
 Begin
 ResetPrefixIndex();
+SetLength(ArrShares,0);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -327,7 +427,7 @@ End;
 Class Procedure PoolServerEvents.OnConnect(AContext: TIdContext);
 var
   IPUser, Linea    : String;
-  Command, Address : String;
+  Command, Address, ThisShare : String;
 Begin
 IPUser := AContext.Connection.Socket.Binding.PeerIP;
 Linea := '';
@@ -344,14 +444,20 @@ END{Try};
 Command := Parameter(Linea,0);
 Address := Parameter(Linea,1);
 If UpperCase(Command) = 'SOURCE' then
-   Begin
+   begin
    if CheckIPMiners(IPUser) then
       begin
-      TryClosePoolConnection(AContext,GetPrefixStr+' '+MinerDiff{+' '+GetAddressBalance(Address)});
+      TryClosePoolConnection(AContext,GetPrefixStr+' '+MinerDiff+' '+GetMinerBalance(Address).ToString);
       end;
-   End;
+   end;
+If UpperCase(Command) = 'SHARE' then
+   begin
+   ThisShare := Parameter(Linea,2);
+   if ShareIsValid(ThisShare,Address) then
+      begin
 
-
+      end;
+   end;
 End;
 
 END. // End unit

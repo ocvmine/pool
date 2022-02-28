@@ -65,6 +65,8 @@ if number = 5 then
       begin
       TextColor(White);TextBackground(Red);Write(Format(' %s ',['OFF']))
       end;
+   TextBackground(Black);Write('  ');
+   Textcolor(white);TextBackground(green);Write(MinersCount.ToString);
    UpdateServerInfo := false;
    PrintLine(10);
    end;
@@ -182,13 +184,21 @@ InitCriticalSection(CS_UpdateScreen);
 InitCriticalSection(CS_PrefixIndex);
 InitCriticalSection(CS_LogLines);
 InitCriticalSection(CS_NewLogLines);
+InitCriticalSection(CS_Miners);
+InitCriticalSection(CS_Shares);
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
+SetLength(ArrMiners,0);
+SetLength(ArrShares,0);
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
+if not directoryexists('miners') then createdir('miners');
+AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
 Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
+if not FileExists('miners'+DirectorySeparator+'miners.dat') then CreateMinersFile();
+LoadMiners();
 If not ResetLogs then
    begin
    writeln('Error reseting log files');
@@ -285,5 +295,7 @@ DoneCriticalSection(CS_UpdateScreen);
 DoneCriticalSection(CS_PrefixIndex);
 DoneCriticalSection(CS_LogLines);
 DoneCriticalSection(CS_NewLogLines);
+DoneCriticalSection(CS_Miners);
+DoneCriticalSection(CS_Shares);
 END.
 
