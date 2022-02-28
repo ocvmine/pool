@@ -5,7 +5,7 @@ UNIT coreunit;
 INTERFACE
 
 USES
-  Classes, SysUtils, dateutils, IdTCPClient, IdGlobal, MD5;
+  Classes, SysUtils, dateutils, IdTCPClient, IdGlobal, MD5, StrUtils;
 
 TYPE
 
@@ -43,10 +43,13 @@ Function Parameter(LineText:String;ParamNumber:int64):String;
 Function UTCTime():int64;
 Function GetConsensus():Boolean;
 Procedure LoadNodes();
+Procedure SetMainConsensus(New:TnodeData);
+Function GetMainConsensus():TNodeData;
 Function GetNodeIndex(Index:integer):TNodeData;
 Procedure CloseSyncingThread();
 Function NosoHash(source:string):string;
 Function HashMD5String(StringToHash:String):String;
+Function CheckHashDiff(Target,ThisHash:String):string;
 
 CONST
   HasheableChars = '!"#$%&'')*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
@@ -55,8 +58,10 @@ var
   MainConsensus : TNodeData;
   SyncingThreads: Integer;
   ContactedNodes: Integer;
+  LengthNodes   : Integer;
   CS_NodesArray : TRTLCriticalSection;
   CS_CSThread   : TRTLCriticalSection;
+  CS_Consensus  : TRTLCriticalSection;
   NodesArray    : Array of TNodeData;
   DefaultNodes  : String = '23.94.21.83:8080 '+'45.146.252.103:8080 '+'107.172.5.8:8080 '+
                           '109.230.238.240:8080 '+'172.245.52.208:8080 '+'192.210.226.118:8080 '+'194.156.88.117:8080';
@@ -181,8 +186,8 @@ Function GetConsensus():Boolean;
 var
   Counter  : integer;
   UseThread: TTGetNodeStatus;
-  ThisNode : TNodeData;
   ArrT     : array of TConsensusData;
+  ResNode  : TNodeData;
 
   function GetHighest():string;
    var
@@ -226,10 +231,9 @@ var
 Begin
 Result := False;
 ContactedNodes := 0;
-SyncingThreads := length(NodesArray);
-For Counter := 0 to length(NodesArray)-1 do
+SyncingThreads := LengthNodes;
+For Counter := 0 to LengthNodes-1 do
    begin
-   ThisNode := GetNodeIndex(Counter);
    UseThread := TTGetNodeStatus.Create(True,counter);
    UseThread.FreeOnTerminate:=true;
    UseThread.Start;
@@ -238,30 +242,44 @@ For Counter := 0 to length(NodesArray)-1 do
 REPEAT
    sleep(1);
 UNTIL SyncingThreads <= 0;
-If ContactedNodes>=(length(NodesArray) div 2)+1 then
+If ContactedNodes>=(LengthNodes div 2)+1 then
    begin
-   Result := true;
+   ResNode := Default(TNodeData);
    MainConsensus := Default(TNodeData);
    // Get the consensusblock
-   For counter := 0 to length (NodesArray)-1 do
+   For counter := 0 to LengthNodes-1 do
       begin
       AddValue(GetNodeIndex(counter).block.ToString);
-      MainConsensus.block := GetHighest.ToInteger;
+      ResNode.block := GetHighest.ToInteger;
       end;
    // Get the consensus LBHash
    SetLength(ArrT,0);
-   For counter := 0 to length (NodesArray)-1 do
+   For counter := 0 to LengthNodes-1 do
       Begin
       AddValue(GetNodeIndex(counter).LBHash);
-      MainConsensus.LBHash := GetHighest;
+      ResNode.LBHash := GetHighest;
       End;
    // Get the consensus last block time end
    SetLength(ArrT,0);
-   For counter := 0 to length (NodesArray)-1 do
+   For counter := 0 to LengthNodes-1 do
       Begin
       AddValue(GetNodeIndex(counter).LBTimeEnd.ToString);
-      MainConsensus.LBTimeEnd := GetHighest.ToInt64;
+      ResNode.LBTimeEnd := GetHighest.ToInt64;
       End;
+   // Get the consensus last block Miner
+   SetLength(ArrT,0);
+   For counter := 0 to LengthNodes-1 do
+      Begin
+      AddValue(GetNodeIndex(counter).LBMiner);
+      ResNode.LBMiner := GetHighest;
+      End;
+   {More fields to get update}
+
+   if ResNode.block>GetMainConsensus.block then
+      begin
+      result := true;
+      SetMainConsensus(ResNode);
+      end;
    end;
 End;
 
@@ -288,7 +306,22 @@ REPEAT
    Counter := Counter+1;
    End;
 UNTIL ThisNode = '';
+LengthNodes := length(NodesArray);
 LeaveCriticalSection(CS_NodesArray);
+End;
+
+Procedure SetMainConsensus(New:TnodeData);
+Begin
+EnterCriticalSection(CS_Consensus);
+MainConsensus := New;
+LeaveCriticalSection(CS_Consensus);
+End;
+
+Function GetMainConsensus():TNodeData;
+Begin
+EnterCriticalSection(CS_Consensus);
+Result := MainConsensus;
+LeaveCriticalSection(CS_Consensus);
 End;
 
 Function GetNodeIndex(Index:integer):TNodeData;
@@ -376,14 +409,35 @@ Begin
 result := Uppercase(MD5Print(MD5String(StringToHash)));
 end;
 
+Function CheckHashDiff(Target,ThisHash:String):string;
+var
+   counter : integer;
+   ValA, ValB, Diference : Integer;
+   ResChar : String;
+   Resultado : String = '';
+Begin
+result := 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+for counter := 1 to 32 do
+   begin
+   ValA := Hex2Dec(ThisHash[counter]);
+   ValB := Hex2Dec(Target[counter]);
+   Diference := Abs(ValA - ValB);
+   ResChar := UPPERCASE(IntToHex(Diference,1));
+   Resultado := Resultado+ResChar
+   end;
+Result := Resultado;
+End;
 
 INITIALIZATION
 InitCriticalSection(CS_NodesArray);
 InitCriticalSection(CS_CSThread);
+InitCriticalSection(CS_Consensus);
+
 
 FINALIZATION
 DoneCriticalSection(CS_NodesArray);
 DoneCriticalSection(CS_CSThread);
+DoneCriticalSection(CS_Consensus);
 
 END. // End unit
 

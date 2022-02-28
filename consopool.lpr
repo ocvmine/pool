@@ -67,6 +67,8 @@ if number = 5 then
       end;
    TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(green);Write(MinersCount.ToString);
+   TextBackground(Black);Write('  ');
+   Textcolor(white);TextBackground(green);Write(SharesCount.ToString);
    UpdateServerInfo := false;
    PrintLine(10);
    end;
@@ -122,7 +124,7 @@ WriteLn();
 WriteLn('Nodes List: ');
 WriteLn();
 
-For counter := 0 to length(NodesArray)-1 do
+For counter := 0 to LengthNodes-1 do
    begin
    ThisNode := GetNodeIndex(Counter);
    writeln(Format(' %d %s %d',[Counter,ThisNode.host,ThisNode.port]));
@@ -186,6 +188,8 @@ InitCriticalSection(CS_LogLines);
 InitCriticalSection(CS_NewLogLines);
 InitCriticalSection(CS_Miners);
 InitCriticalSection(CS_Shares);
+InitCriticalSection(CS_BlockBest);
+InitCriticalSection(CS_Solution);
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
 SetLength(ArrMiners,0);
@@ -213,6 +217,9 @@ LastHelpShown := DefHelpLine;
 ToLog('********** New Session **********');
 REPEAT
    REPEAT
+      SolutionLine := GetSolution();
+      If SolutionLine <> '' then
+         SendSolution(Parameter(SolutionLine,0),Parameter(SolutionLine,1),Parameter(SolutionLine,2));
       if UpdateScreen then PrintUpdateScreen();
       if ( ((LastConsensusTry+4<UTCTime) and (UTCTime-MainConsensus.LBTimeEnd>604) or (LastConsensusTry=0)) and
          (not WaitingConsensus) )then
@@ -297,5 +304,7 @@ DoneCriticalSection(CS_LogLines);
 DoneCriticalSection(CS_NewLogLines);
 DoneCriticalSection(CS_Miners);
 DoneCriticalSection(CS_Shares);
+DoneCriticalSection(CS_BlockBest);
+DoneCriticalSection(CS_Solution);
 END.
 

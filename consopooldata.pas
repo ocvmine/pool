@@ -5,7 +5,8 @@ UNIT consopooldata;
 INTERFACE
 
 USES
-  Classes, SysUtils, coreunit, IdTCPServer, IdContext, IdGlobal, StrUtils;
+  Classes, SysUtils, coreunit, IdTCPServer, IdContext, IdGlobal, StrUtils,
+  IdTCPClient;
 
 Type
   PoolServerEvents = class
@@ -17,6 +18,7 @@ Type
     address : string[40];
     Balance : int64;
     LastPay : integer;
+    Shares  : integer;
     end;
 
 Procedure CreateMinersFile();
@@ -24,8 +26,14 @@ Procedure LoadMiners();
 Function MinersCount():integer;
 Function GetMinerBalance(address:string):int64;
 
+Procedure AddShare(Share:string);
+Function SharesCount():Integer;
 Function ShareAlreadyExists(Share:string):boolean;
+Procedure CreditShare(Address:String);
 Function ShareIsValid(Share,Address:String):Boolean;
+
+Procedure SetSolution(Share,Address, Diff:String);
+Function GetSolution():String;
 
 Function ResetLogs():boolean;
 function SaveConfig():boolean;
@@ -39,15 +47,19 @@ Procedure TryClosePoolConnection(AContext: TIdContext; closemsg:string='');
 Function StartPool():String;
 Function StopPool():String;
 Procedure ToLog(Texto:string);
+Function GetBlockBest():String;
+Procedure SetBlockBest(Value:String);
 Procedure ResetBlock();
 Function GetPrefixIndex():Integer;
 Procedure ResetPrefixIndex();
 function GetPrefixStr():string;
+Procedure SendSolution(SolAddress,SolHash, SolDiff:String);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
   AppVersion = 'v0.1';
   DefHelpLine= 'Type help for available commands';
+  DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
 VAR
   // Files
@@ -81,6 +93,10 @@ VAR
   IPMiners: integer = 100;
   ArrMiners : Array of TMinersData;
   ArrShares : Array of string;
+  BlockTargetHash : String = '';
+  ThisBlockBest   : String = DefWorst;
+  Solution        : String = '';
+  SolutionLine    : String;
 
   // Critical sections
   CS_UpdateScreen : TRTLCriticalSection;
@@ -89,6 +105,8 @@ VAR
   CS_LogLines     : TRTLCriticalSection;
   CS_Miners       : TRTLCriticalSection;
   CS_Shares       : TRTLCriticalSection;
+  CS_BlockBest    : TRTLCriticalSection;
+  CS_Solution     : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -142,7 +160,6 @@ for counter := 0 to length(ArrMiners)-1 do
 LeaveCriticalSection(CS_Miners);
 End;
 
-
 Function ShareAlreadyExists(Share:string):boolean;
 var
   counter : integer;
@@ -160,15 +177,88 @@ For counter := 0 to length(ArrShares)-1 do
 LeaveCriticalSection(CS_Shares);
 End;
 
+Procedure CreditShare(Address:String);
+var
+  counter : integer;
+  Credited : boolean = false;
+  NewMiner : TMinersData;
+Begin
+EnterCriticalSection(CS_Miners);
+For counter := 0 to length(ArrMiners)-1 do
+   begin
+   if ArrMiners[counter].address = address then
+      begin
+      Credited := true;
+      ArrMiners[counter].Shares:=ArrMiners[counter].Shares+1;
+      break
+      end;
+   end;
+if Not Credited then
+   begin
+   NewMiner := Default(TMinersData);
+   NewMiner.address:=address;
+   NewMiner.Shares:=1;
+   NewMiner.Balance:=0;
+   NewMiner.LastPay:=GetMainConsensus.block;
+   Insert(NewMiner,ArrMiners,Length(ArrMiners));
+   end;
+LeaveCriticalSection(CS_Miners);
+End;
+
+Procedure AddShare(Share:string);
+Begin
+EnterCriticalSection(CS_Shares);
+insert(share,ArrShares,length(ArrShares));
+LeaveCriticalSection(CS_Shares);
+End;
+
+Function SharesCount():Integer;
+Begin
+EnterCriticalSection(CS_Shares);
+Result := length(ArrShares);
+LeaveCriticalSection(CS_Shares);
+End;
+
+Procedure SetSolution(Share,Address,Diff:String);
+Begin
+EnterCriticalSection(CS_Solution);
+if Diff<Parameter(Solution,2) then
+   begin
+   Solution := Address+' '+Share+' '+Diff;
+   Trim(Solution);
+   end;
+LeaveCriticalSection(CS_Solution);
+End;
+
+Function GetSolution():String;
+Begin
+EnterCriticalSection(CS_Solution);
+Result := Solution;
+Solution := '';
+LeaveCriticalSection(CS_Solution);
+End;
+
 Function ShareIsValid(Share,Address:String):Boolean;
 var
-  ThisHash : string;
+  ThisHash, ThisDiff : string;
 Begin
-Result := true;
-if ShareAlreadyExists(Share+address) then Result := false
+Result := False;
+if ShareAlreadyExists(Share+address) then exit
 else
    begin
    ThisHash := NosoHash(Share+Address);
+   ThisDiff := CheckHashDiff(GetMainConsensus.LBHash,ThisHash);
+   if ThisDiff < MinerDiff then // Valid share
+      begin
+      Result := true;
+      AddShare(Share+Address);
+      CreditShare(Address);
+      if ThisDiff<GetBlockBest then
+         begin
+         SetSolution(Address,Share,ThisDiff);
+         SetBlockBest(ThisDiff);
+         end;
+      end;
    end;
 End;
 
@@ -349,10 +439,28 @@ LeaveCriticalSection(CS_LogLines);
 if OnLogScreen then WriteLn(Texto);
 End;
 
+Function GetBlockBest():String;
+Begin
+EnterCriticalSection(CS_BlockBest);
+Result := ThisBlockBest;
+LeaveCriticalSection(CS_BlockBest);
+End;
+
+Procedure SetBlockBest(Value:String);
+Begin
+EnterCriticalSection(CS_BlockBest);
+ThisBlockBest := value;
+LeaveCriticalSection(CS_BlockBest);
+End;
+
 Procedure ResetBlock();
 Begin
 ResetPrefixIndex();
+SetBlockBest(DefWorst);
+SetSolution('','','');
+EnterCriticalSection(CS_Shares);
 SetLength(ArrShares,0);
+LeaveCriticalSection(CS_Shares);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -447,16 +555,72 @@ If UpperCase(Command) = 'SOURCE' then
    begin
    if CheckIPMiners(IPUser) then
       begin
+      // 1{MinerPrefix} 2{PoolMinDiff} 3{MinerBalance}
+      ToLog('Miner from '+IPUser);
       TryClosePoolConnection(AContext,GetPrefixStr+' '+MinerDiff+' '+GetMinerBalance(Address).ToString);
       end;
-   end;
-If UpperCase(Command) = 'SHARE' then
+   end
+else If UpperCase(Command) = 'SHARE' then
    begin
    ThisShare := Parameter(Linea,2);
    if ShareIsValid(ThisShare,Address) then
       begin
-
+      TryClosePoolConnection(AContext,'True');
       end;
+   end
+{
+else If UpperCase(Command) = 'POOLSTATUS' then
+   begin
+
+   end
+}
+else
+   begin
+   TryClosePoolConnection(AContext);
+   end;
+End;
+
+Procedure SendSolution(SolAddress,SolHash, SolDiff:String);
+var
+  TCPClient : TidTCPClient;
+  Node : integer;
+  Resultado : string;
+  Trys : integer = 0;
+  Success, WasGood : boolean;
+  NewDiff : String;
+  ErrorCode : integer = 0;
+Begin
+Node := Random(LengthNodes);
+TCPClient := TidTCPClient.Create(nil);
+TCPclient.ConnectTimeout:= 3000;
+TCPclient.ReadTimeout:=3000;
+REPEAT
+Node := Node+1; If Node >= LengthNodes then Node := 0;
+TCPclient.Host:=GetNodeIndex(Node).host;
+TCPclient.Port:=GetNodeIndex(Node).port;
+Success := false;
+Trys :=+1;
+TRY
+TCPclient.Connect;
+TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+SolAddress+' '+SolHash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
+Resultado := TCPclient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
+TCPclient.Disconnect();
+Success := true;
+EXCEPT on E:Exception do
+   begin
+   Success := false;
+   end;
+END{try};
+UNTIL ((Success) or (Trys = 5));
+TCPClient.Free;
+If success then
+   begin
+   SetBlockBest(Parameter(Resultado,1));
+   end
+else
+   begin
+   ToLog('Unable to send solution');
+   SetSolution(SolAddress,SolHash,SolDiff);
    end;
 End;
 
