@@ -44,7 +44,7 @@ if number = 4 then
    if IfText<>'1' then
       begin
       Textcolor(white);TextBackground(green);
-      Write(Format(' %d [%d/7] ',[MainConsensus.block,ContactedNodes]));
+      Write(Format(' %d [%d/%d] ',[MainConsensus.block,ContactedNodes,LengthNodes]));
       TextBackground(Black);Write('  ');
       Textcolor(white);TextBackground(green);
       Write(Format(' %s ',[Copy(MainConsensus.lbhash,1,10)]));
@@ -69,8 +69,18 @@ if number = 5 then
    Textcolor(white);TextBackground(green);Write(MinersCount.ToString);
    TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(green);Write(SharesCount.ToString);
+   TextBackground(Black);Write('  ');
+   Textcolor(white);TextBackground(green);Write(Copy(ThisBlockBest,1,10));
    UpdateServerInfo := false;
+   TextBackground(Black);Write('  ');
+   Textcolor(white);TextBackground(green);Write(Copy(MainBestDiff,1,10));
    PrintLine(10);
+   end;
+if number = 6 then
+   begin
+   Textcolor(white);TextBackground(Black);
+   write(Format(' %s    %d    %d    %s',[UpTime,SESSION_BestHashes, SESSION_Shares, GetSessionSpeed]));
+   RefreshUpTime := UTCTime;
    end;
 if number = 10 then
    begin
@@ -98,7 +108,6 @@ WriteLn();
 Writeln('help    [F1]           -> Shows this info');
 Writeln('nodes   [F2]           -> Shows the seed nodes');
 Writeln('sync    [F3]           -> Syncs with mainnet (Debug)');
-Writeln('log     [F4]           -> Shows the session log');
 Writeln('run     [F5]           -> Starts the pool');
 Writeln('stop    [F6]           -> Stops the pool');
 Writeln('exit    [ESC]          -> Close the app');
@@ -140,36 +149,6 @@ LastHelpShown := DefHelpLine;
 SetUpdateScreen();
 End;
 
-Procedure ShowLog();
-Var
-  Counter : Integer;
-Begin
-OnMainScreen := false;
-OnLogScreen := true;
-TextBackground(Black);TextColor(White);ClrScr();
-PrintLine(1);WriteLn();
-TextBackground(Black);TextColor(White);
-WriteLn();
-WriteLn('Session log: ');
-WriteLn();
-
-EnterCriticalSection(CS_LogLines);
-For counter := 0 to length(LogLines)-1 do
-   begin
-   writeln(LogLines[counter]);
-   end;
-LeaveCriticalSection(CS_LogLines);
-//WriteLn();
-//Write('Press any key to return');
-ThisChar := ReadKey;
-If ThisChar = #0 then ThisChar := Readkey;
-ClrScr();
-OnMainScreen := true;
-OnLogScreen := False;
-LastHelpShown := DefHelpLine;
-SetUpdateScreen();
-End;
-
 Procedure PrintUpdateScreen();
 Begin
 PrintLine(1);
@@ -181,11 +160,37 @@ PrintLine(11,LastHelpShown);
 PrintLine(10);
 End;
 
+Procedure CheckLogs();
+var
+  Texto : String;
+Begin
+if length(LogLines)>0 then
+   begin
+   EnterCriticalSection(CS_LogLines);
+   window(1,13,80,24);
+   GotoXy(80,11);WriteLn();
+   Repeat
+      begin
+      Texto := LogLines[0];
+      Delete(LogLines,0,1);
+      if Copy(Texto,1,1) = ',' then
+         begin
+         TextColor(Green);
+         Texto := Copy(Texto,1,length(Texto));
+         end
+      else TextColor(White);
+      WriteLn(Texto);
+      end;
+   until length(LogLines) = 0;
+   Window(1,1,80,25);
+   LeaveCriticalSection(CS_LogLines);
+   end;
+End;
+
 BEGIN
 InitCriticalSection(CS_UpdateScreen);
 InitCriticalSection(CS_PrefixIndex);
 InitCriticalSection(CS_LogLines);
-InitCriticalSection(CS_NewLogLines);
 InitCriticalSection(CS_Miners);
 InitCriticalSection(CS_Shares);
 InitCriticalSection(CS_BlockBest);
@@ -217,20 +222,27 @@ LastHelpShown := DefHelpLine;
 ToLog('********** New Session **********');
 REPEAT
    REPEAT
-      SolutionLine := GetSolution();
-      If SolutionLine <> '' then
-         SendSolution(Parameter(SolutionLine,0),Parameter(SolutionLine,1),Parameter(SolutionLine,2));
+      If ((GetSolution.Diff<MainBestDiff) and (GetSolution.Hash<>'')) then SendSolution(GetSolution);
       if UpdateScreen then PrintUpdateScreen();
+      CheckLogs();
       if ( ((LastConsensusTry+4<UTCTime) and (UTCTime-MainConsensus.LBTimeEnd>604) or (LastConsensusTry=0)) and
          (not WaitingConsensus) )then
          Begin
          PrintLine(4,'1');
          WaitingConsensus := true;
+         CurrentBlock := GetMainConsensus.block;
          GetConsensus;
+         if GetMainConsensus.block>CurrentBlock then
+            begin
+            CurrentBlock := GetMainConsensus.block;
+            ResetBlock();
+            UpdateServerInfo := true;
+            end;
          WaitingConsensus := False;
          LastConsensusTry := UTCTime;
          PrintLine(4);
          End;
+      if RefreshUpTime <> UTCtime then PrintLine(6);
       if RefreshAge<> UTCTime then
          begin
          PrintLine(4);
@@ -257,11 +269,6 @@ REPEAT
          Command := 'sync';
          ThisChar := #13;
          end;
-      if ThisChar=#62 then // F4
-         begin
-         Command := 'log';
-         ThisChar := #13;
-         end;
       end;
    if ((Ord(ThisChar)>=32) and (Ord(ThisChar)<=126)) then
       begin
@@ -278,7 +285,6 @@ REPEAT
       if Uppercase(Parameter(Command,0)) = 'EXIT' then FinishProgram := true
       else if Uppercase(Parameter(Command,0)) = 'HELP' then ShowHelp
       else if Uppercase(Parameter(Command,0)) = 'NODES' then ShowNodes
-      else if Uppercase(Parameter(Command,0)) = 'LOG' then ShowLog
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(11,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(11,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SYNC' then
@@ -301,7 +307,6 @@ PoolServer.Free;
 DoneCriticalSection(CS_UpdateScreen);
 DoneCriticalSection(CS_PrefixIndex);
 DoneCriticalSection(CS_LogLines);
-DoneCriticalSection(CS_NewLogLines);
 DoneCriticalSection(CS_Miners);
 DoneCriticalSection(CS_Shares);
 DoneCriticalSection(CS_BlockBest);

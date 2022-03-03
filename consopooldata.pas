@@ -6,13 +6,19 @@ INTERFACE
 
 USES
   Classes, SysUtils, coreunit, IdTCPServer, IdContext, IdGlobal, StrUtils,
-  IdTCPClient;
+  IdTCPClient, math;
 
 Type
   PoolServerEvents = class
     class procedure OnExecute(AContext: TIdContext);
     class procedure OnConnect(AContext: TIdContext);
   end;
+
+  TSolution   = Packed Record
+    Hash    : string;
+    address : string;
+    Diff    : string;
+    end;
 
   TMinersData = Packed Record
     address : string[40];
@@ -32,8 +38,8 @@ Function ShareAlreadyExists(Share:string):boolean;
 Procedure CreditShare(Address:String);
 Function ShareIsValid(Share,Address:String):Boolean;
 
-Procedure SetSolution(Share,Address, Diff:String);
-Function GetSolution():String;
+Procedure SetSolution(Data:TSolution);
+Function GetSolution():TSolution;
 
 Function ResetLogs():boolean;
 function SaveConfig():boolean;
@@ -45,15 +51,18 @@ function CheckIPMiners(UserIP:String):Boolean;
 Function TryMessageToMiner(AContext: TIdContext;message:string):boolean;
 Procedure TryClosePoolConnection(AContext: TIdContext; closemsg:string='');
 Function StartPool():String;
+Function UpTime():string;
 Function StopPool():String;
+Function GetDiffHashrate(bestdiff:String):integer;
+Function GetSessionSpeed(): String;
 Procedure ToLog(Texto:string);
 Function GetBlockBest():String;
-Procedure SetBlockBest(Value:String);
+Procedure SetBlockBest(ThisValue:String);
 Procedure ResetBlock();
 Function GetPrefixIndex():Integer;
 Procedure ResetPrefixIndex();
 function GetPrefixStr():string;
-Procedure SendSolution(SolAddress,SolHash, SolDiff:String);
+Procedure SendSolution(Data:TSolution);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
@@ -67,7 +76,7 @@ VAR
   MinersFile : File of TMinersData;
   // Config values
   PoolPort     : integer = 8082;
-  MinDiffBase  : string  = '00000';
+  MinDiffBase  : string  = '0000';
   PoolFee      : integer = 100;
   PoolPay      : integer = 30;
   PoolAddress  : String  = 'N4PeJyqj8diSXnfhxSQdLpo8ddXTaGd';
@@ -81,11 +90,14 @@ VAR
     RefreshScreen : Boolean = true;
     RefreshAge    : Int64 = 0;
     UpdateServerInfo : boolean = false;
+    RefreshUpTime : int64 = 0;
   LogLines     : Array of String;
   NewLogLines  : Array of string;
   // Mainnet
   LastConsensusTry: int64   = 0;
   WaitingConsensus:Boolean = false;
+  CurrentBlock    : integer = 0;
+  MainBestDiff    : String = DefWorst;
   // Pool
   PoolServer : TIdTCPServer;
   PrefixIndex: Integer = 0;
@@ -96,12 +108,14 @@ VAR
   BlockTargetHash : String = '';
   ThisBlockBest   : String = DefWorst;
   Solution        : String = '';
-  SolutionLine    : String;
-
+  BestPoolSolution: TSolution;
+  SESSION_BestHashes : Integer = 0;
+  SESSION_Started    : Int64 = 0;
+  SESSION_Shares     : integer = 0;
+  SESSION_HashPerShare : QWord = 0;
   // Critical sections
   CS_UpdateScreen : TRTLCriticalSection;
   CS_PrefixIndex  : TRTLCriticalSection;
-  CS_NewLogLines  : TRTLCriticalSection;
   CS_LogLines     : TRTLCriticalSection;
   CS_Miners       : TRTLCriticalSection;
   CS_Shares       : TRTLCriticalSection;
@@ -219,45 +233,61 @@ Result := length(ArrShares);
 LeaveCriticalSection(CS_Shares);
 End;
 
-Procedure SetSolution(Share,Address,Diff:String);
+Procedure SetSolution(Data:TSolution);
 Begin
 EnterCriticalSection(CS_Solution);
-if Diff<Parameter(Solution,2) then
-   begin
-   Solution := Address+' '+Share+' '+Diff;
-   Trim(Solution);
-   end;
+BestPoolSolution := Data;
+if BestPoolSolution.Diff = '' then BestPoolSolution.Diff := 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 LeaveCriticalSection(CS_Solution);
 End;
 
-Function GetSolution():String;
+Function GetSolution():TSolution;
 Begin
 EnterCriticalSection(CS_Solution);
-Result := Solution;
-Solution := '';
+Result := BestPoolSolution;
 LeaveCriticalSection(CS_Solution);
 End;
 
 Function ShareIsValid(Share,Address:String):Boolean;
 var
   ThisHash, ThisDiff : string;
+  ThisSolution : TSolution;
 Begin
 Result := False;
-if ShareAlreadyExists(Share+address) then exit
+if ShareAlreadyExists(Share+address) then
+   begin
+   ToLog('Duplicated share received');
+   end
 else
    begin
-   ThisHash := NosoHash(Share+Address);
+   ThisHash := NosoHash(Share+PoolAddress);
    ThisDiff := CheckHashDiff(GetMainConsensus.LBHash,ThisHash);
    if ThisDiff < MinerDiff then // Valid share
       begin
       Result := true;
       AddShare(Share+Address);
       CreditShare(Address);
-      if ThisDiff<GetBlockBest then
+      Inc(SESSION_Shares);
+      UpdateServerInfo := true;
+      if ThisDiff<MainBestDiff then
          begin
-         SetSolution(Address,Share,ThisDiff);
+         ThisSolution.Hash:=Share;
+         ThisSolution.address:=Address;
+         ThisSolution.Diff:=ThisDiff;
+         SetSolution(ThisSolution);
          SetBlockBest(ThisDiff);
          end;
+      if ThisDiff<GetBlockBEst then
+         begin
+         ThisSolution.Hash:=Share;
+         ThisSolution.address:=Address;
+         ThisSolution.Diff:=ThisDiff;
+         SetBlockBest(ThisDiff)
+         end;
+      end
+   else
+      begin
+      //ToLog('Invalid share: '+Slinebreak+address+slinebreak+share+slinebreak+thisdiff+slinebreak+'TARGET:'+GetMainConsensus.LBHash);
       end;
    end;
 End;
@@ -301,6 +331,7 @@ Begin
 result := true;
 TRY
 rewrite(configfile);
+writeln(configfile,'pooladdress '+PoolAddress);
 writeln(configfile,'poolport '+IntToStr(PoolPort));
 writeln(configfile,'diffbase '+MinDiffBase);
 writeln(configfile,'poolfee '+IntToStr(PoolFee));
@@ -394,7 +425,10 @@ PoolServer.DefaultPort:=PoolPort;
 PoolServer.Active:=true;
 Success := true;
 MinerDiff := AddCharR('F',MinDiffBase,32);
-ResetBlock();
+ToLog('Server started at port '+PoolPort.ToString);
+SESSION_Started := UTCTime;
+SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
+ToLog('Hashes Per Share : '+SESSION_HashPerShare.ToString);
 EXCEPT ON E:Exception do
    Result := E.Message;
 END; {TRY}
@@ -403,6 +437,27 @@ If success then
    Result := 'Pool server started';
    UpdateServerInfo := true;
    end;
+End;
+
+Function UpTime():string;
+var
+  TotalSeconds,days,hours,minutes,seconds, remain : integer;
+Begin
+if SESSION_Started = 0 then
+   begin
+   Result := '00:00:00';
+   exit;
+   end;
+Totalseconds := UTCTime-SESSION_Started;
+Days := Totalseconds div 86400;
+remain := Totalseconds mod 86400;
+hours := remain div 3600;
+remain := remain mod 3600;
+minutes := remain div 60;
+remain := remain mod 60;
+seconds := remain;
+if Days > 0 then Result:= Format('%dd %.2d:%.2d:%.2d', [Days, Hours, Minutes, Seconds])
+else Result:= Format('%.2d:%.2d:%.2d', [Hours, Minutes, Seconds]);
 End;
 
 Function StopPool():String;
@@ -417,6 +472,7 @@ if not PoolServer.Active then
 TRY
 PoolServer.Active:=false;
 Success := true;
+SESSION_Started := 0;
 EXCEPT On E:Exception do
    Result := E.Message;
 END; {TRY}
@@ -427,16 +483,35 @@ If success then
    end;
 End;
 
+Function GetDiffHashrate(bestdiff:String):integer;
+var
+  counter:integer = 0;
+Begin
+repeat
+  counter := counter+1;
+until bestdiff[counter]<> '0';
+Result := (Counter-1)*100;
+if bestdiff[counter]='1' then Result := Result+50;
+if bestdiff[counter]='2' then Result := Result+25;
+if bestdiff[counter]='3' then Result := Result+12;
+if bestdiff[counter]='4' then Result := Result+6;
+if bestdiff[counter]='5' then Result := Result+3;
+End;
+
+Function GetSessionSpeed(): String;
+var
+  seconds : integer;
+Begin
+Seconds := UTCTime-SESSION_Started;
+Result := IntToStr((SESSION_HashPerShare*SESSION_Shares) div (seconds+1))+' Kh/s';
+End;
+
 Procedure ToLog(Texto:string);
 Begin
 Texto := DateTimeToStr(now)+' '+Texto;
-EnterCriticalSection(CS_NewLogLines);
-Insert(Texto,NewLogLines,Length(NewLogLines));
-LeaveCriticalSection(CS_NewLogLines);
 EnterCriticalSection(CS_LogLines);
 Insert(Texto,LogLines,Length(LogLines));
 LeaveCriticalSection(CS_LogLines);
-if OnLogScreen then WriteLn(Texto);
 End;
 
 Function GetBlockBest():String;
@@ -446,21 +521,23 @@ Result := ThisBlockBest;
 LeaveCriticalSection(CS_BlockBest);
 End;
 
-Procedure SetBlockBest(Value:String);
+Procedure SetBlockBest(ThisValue:String);
 Begin
 EnterCriticalSection(CS_BlockBest);
-ThisBlockBest := value;
+ThisBlockBest := ThisValue;
 LeaveCriticalSection(CS_BlockBest);
 End;
 
 Procedure ResetBlock();
 Begin
+MainBestDiff := DefWorst;
 ResetPrefixIndex();
 SetBlockBest(DefWorst);
-SetSolution('','','');
+SetSolution(Default(TSolution));
 EnterCriticalSection(CS_Shares);
 SetLength(ArrShares,0);
 LeaveCriticalSection(CS_Shares);
+SetLength(ArrMiners,0);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -540,24 +617,34 @@ Begin
 IPUser := AContext.Connection.Socket.Binding.PeerIP;
 Linea := '';
 TRY
-Linea := AContext.Connection.IOHandler.ReadLn('',1000,-1,IndyTextEncoding_UTF8);
+Linea := AContext.Connection.IOHandler.ReadLn('',3000,-1,IndyTextEncoding_UTF8);
 EXCEPT On E:Exception do
    begin
    TRY
    AContext.Connection.Disconnect;
-   EXCEPT On E:Exception do DoNothing;
+   EXCEPT On E:Exception do
+      begin
+      TryClosePoolConnection(AContext);
+      exit;
+      end
    END{Try};
    end;
 END{Try};
 Command := Parameter(Linea,0);
 Address := Parameter(Linea,1);
+//ToLog('Line received from '+IPUser+'->'+Linea);
 If UpperCase(Command) = 'SOURCE' then
    begin
    if CheckIPMiners(IPUser) then
       begin
-      // 1{MinerPrefix} 2{PoolMinDiff} 3{MinerBalance}
-      ToLog('Miner from '+IPUser);
-      TryClosePoolConnection(AContext,GetPrefixStr+' '+MinerDiff+' '+GetMinerBalance(Address).ToString);
+      // 1{MinerPrefix} 2{MinerAddress} 3{PoolMinDiff} 4{LBHash} 5{LBNumber} 6{MinerBalance}
+      //ToLog('Miner from '+IPUser);
+      TryClosePoolConnection(AContext,'OK '+{1}GetPrefixStr+' '+
+                                            {2}PoolAddress+' '+
+                                            {3}MinerDiff+' '+
+                                            {4}GetMainConsensus.LBHash+' '+
+                                            {5}GetMainConsensus.block.ToString+' '+
+                                            {6}GetMinerBalance(Address).ToString);
       end;
    end
 else If UpperCase(Command) = 'SHARE' then
@@ -566,7 +653,13 @@ else If UpperCase(Command) = 'SHARE' then
    if ShareIsValid(ThisShare,Address) then
       begin
       TryClosePoolConnection(AContext,'True');
-      end;
+      //ToLog('Valid share from '+Address);
+      end
+   else
+      begin
+      TryClosePoolConnection(AContext,'False');
+      ToLog('Wrong share from '+Address);
+      end
    end
 {
 else If UpperCase(Command) = 'POOLSTATUS' then
@@ -580,15 +673,15 @@ else
    end;
 End;
 
-Procedure SendSolution(SolAddress,SolHash, SolDiff:String);
+Procedure SendSolution(Data:TSolution);
 var
   TCPClient : TidTCPClient;
   Node : integer;
   Resultado : string;
   Trys : integer = 0;
   Success, WasGood : boolean;
-  NewDiff : String;
-  ErrorCode : integer = 0;
+  Mainnetbest : string;
+  ErrorCode : String;
 Begin
 Node := Random(LengthNodes);
 TCPClient := TidTCPClient.Create(nil);
@@ -602,7 +695,9 @@ Success := false;
 Trys :=+1;
 TRY
 TCPclient.Connect;
-TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+SolAddress+' '+SolHash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
+TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+PoolAddress+' '+GetSolution.Hash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
+ToLog('BESTHASH -> '+Data.Diff);
+
 Resultado := TCPclient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
 TCPclient.Disconnect();
 Success := true;
@@ -615,12 +710,21 @@ UNTIL ((Success) or (Trys = 5));
 TCPClient.Free;
 If success then
    begin
-   SetBlockBest(Parameter(Resultado,1));
+   WasGood := StrToBoolDef(Parameter(Resultado,0),false);
+   ErrorCode := Parameter(Resultado,2);
+   Mainnetbest := Parameter(Resultado,1);
+   MainBestDiff := Mainnetbest;
+   ToLog('MAINNET  -> '+Mainnetbest+' '+ErrorCode);
+   if WasGood then
+      begin
+      ToLog(',Besthash submited: '+Data.Diff);
+      Inc(SESSION_BestHashes);
+      end;
    end
 else
    begin
    ToLog('Unable to send solution');
-   SetSolution(SolAddress,SolHash,SolDiff);
+   SetSolution(GetSolution);
    end;
 End;
 
