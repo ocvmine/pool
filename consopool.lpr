@@ -66,6 +66,8 @@ if number = 5 then
       TextColor(White);TextBackground(Red);Write(Format(' %s ',['OFF']))
       end;
    TextBackground(Black);Write('  ');
+   Textcolor(white);TextBackground(green);Write(BlockPrefixesRequested.ToString);
+   TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(green);Write(MinersCount.ToString);
    TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(green);Write(SharesCount.ToString);
@@ -80,6 +82,7 @@ if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
    write(Format(' %s    %d    %d    %s',[UpTime,SESSION_BestHashes, SESSION_Shares, GetSessionSpeed]));
+   PrintLine(10);
    RefreshUpTime := UTCTime;
    end;
 if number = 10 then
@@ -149,6 +152,35 @@ LastHelpShown := DefHelpLine;
 SetUpdateScreen();
 End;
 
+Procedure ShowBlockShares();
+Var
+  Counter : integer;
+  ThisMiner : TMinersData;
+Begin
+OnMainScreen := false;
+TextBackground(Black);TextColor(White);ClrScr();
+PrintLine(1);WriteLn();
+TextBackground(Black);TextColor(White);
+WriteLn();
+WriteLn('Nodes List: ');
+WriteLn();
+EnterCriticalSection(CS_Miners);
+For counter := 0 to Length(ArrMiners)-1 do
+   begin
+   ThisMiner := ArrMiners[Counter];
+   writeln(Format(' %0:-40s %d ',[ThisMiner.address,ThisMiner.Shares]));
+   end;
+LeaveCriticalSection(CS_Miners);
+WriteLn();
+Write('Press any key to return');
+ThisChar := ReadKey;
+If ThisChar = #0 then ThisChar := Readkey;
+ClrScr();
+OnMainScreen := true;
+LastHelpShown := DefHelpLine;
+SetUpdateScreen();
+End;
+
 Procedure PrintUpdateScreen();
 Begin
 PrintLine(1);
@@ -173,10 +205,10 @@ if length(LogLines)>0 then
       begin
       Texto := LogLines[0];
       Delete(LogLines,0,1);
-      if Copy(Texto,1,1) = ',' then
+      if Texto[1] = ',' then
          begin
          TextColor(Green);
-         Texto := Copy(Texto,1,length(Texto));
+         Texto := Copy(Texto,2,length(Texto));
          end
       else TextColor(White);
       WriteLn(Texto);
@@ -287,6 +319,11 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'NODES' then ShowNodes
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(11,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(11,StopPool)
+      else if Uppercase(Parameter(Command,0)) = 'BLOCKSHARES' then ShowBlockShares
+      else if Uppercase(Parameter(Command,0)) = 'PREFIX' then   // Debug only
+         Begin
+         ToLog(GetPrefixStr(StrToIntDef(Parameter(Command,1),0)));
+         end
       else if Uppercase(Parameter(Command,0)) = 'SYNC' then
          begin
          PrintLine(4,'1');

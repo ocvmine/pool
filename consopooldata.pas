@@ -61,7 +61,7 @@ Procedure SetBlockBest(ThisValue:String);
 Procedure ResetBlock();
 Function GetPrefixIndex():Integer;
 Procedure ResetPrefixIndex();
-function GetPrefixStr():string;
+function GetPrefixStr(IndexValue:integer = -1):string;
 Procedure SendSolution(Data:TSolution);
 
 CONST
@@ -108,6 +108,7 @@ VAR
   BlockTargetHash : String = '';
   ThisBlockBest   : String = DefWorst;
   Solution        : String = '';
+  BlockPrefixesRequested : integer = 0;
   BestPoolSolution: TSolution;
   SESSION_BestHashes : Integer = 0;
   SESSION_Started    : Int64 = 0;
@@ -254,9 +255,9 @@ var
   ThisSolution : TSolution;
 Begin
 Result := False;
-if ShareAlreadyExists(Share+address) then
+if ShareAlreadyExists(Share) then
    begin
-   ToLog('Duplicated share received');
+   ToLog('Duplicated: '+share);
    end
 else
    begin
@@ -508,7 +509,12 @@ End;
 
 Procedure ToLog(Texto:string);
 Begin
-Texto := DateTimeToStr(now)+' '+Texto;
+if Texto[1] = ',' then
+   begin
+   Texto := copy(Texto,2, length(texto));
+   Texto := ','+DateTimeToStr(now)+' '+Texto;
+   end
+else Texto := DateTimeToStr(now)+' '+Texto;
 EnterCriticalSection(CS_LogLines);
 Insert(Texto,LogLines,Length(LogLines));
 LeaveCriticalSection(CS_LogLines);
@@ -538,6 +544,7 @@ EnterCriticalSection(CS_Shares);
 SetLength(ArrShares,0);
 LeaveCriticalSection(CS_Shares);
 SetLength(ArrMiners,0);
+BlockPrefixesRequested := 0;
 End;
 
 Function GetPrefixIndex():Integer;
@@ -555,12 +562,13 @@ PrefixIndex := 0;
 LeaveCriticalSection(CS_PrefixIndex);
 End;
 
-function GetPrefixStr():string;
+function GetPrefixStr(IndexValue:integer = -1):string;
 var
   Index, firstchar, secondchar, ThirdChar : integer;
   HashChars : integer;
 Begin
-Index := GetPrefixIndex();
+if IndexValue = -1 then Index := GetPrefixIndex()
+else Index := IndexValue;
 HashChars := length(HasheableChars)-1;
 firstchar := Index div (HashChars*HashChars);
 Index     := Index mod (HashChars*HashChars);
@@ -637,6 +645,7 @@ If UpperCase(Command) = 'SOURCE' then
    begin
    if CheckIPMiners(IPUser) then
       begin
+      Inc(BlockPrefixesRequested);
       // 1{MinerPrefix} 2{MinerAddress} 3{PoolMinDiff} 4{LBHash} 5{LBNumber} 6{MinerBalance}
       //ToLog('Miner from '+IPUser);
       TryClosePoolConnection(AContext,'OK '+{1}GetPrefixStr+' '+
