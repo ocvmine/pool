@@ -9,7 +9,10 @@ USES
   Classes, SysUtils, CRT, consopooldata, coreunit
   { you can add units after this };
 
+// Prints the specified line of the screen
 Procedure PrintLine(number:integer;IfText:String='');
+var
+  BlockAge : int64 = 0;
 Begin
 TextBackground(Black);
 GotoXY(1,number);ClrEOL;
@@ -27,12 +30,13 @@ if number = 2 then
    TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(Green);Write(Format(' %d ',[PoolPay]));
    TextBackground(Black);Write('  ');
-   Textcolor(white);TextBackground(Green);Write(Format(' %s ',[MinDiffBase]));
+   if AutoDiff then TextBackground(Green) else TextBackground(Red);
+   Textcolor(white);Write(Format(' %s ',[MinDiffBase]));
    end;
 if number = 3 then
    begin
    Textcolor(White);TextBackground(Blue);
-   Write(Format(' %s ',[PoolAddress]));
+   Write(Format(' %s [ %s Noso ]',[PoolAddress,Int2Curr(GetPoolBalance)]));
    end;
 if number = 4 then
    begin
@@ -50,7 +54,13 @@ if number = 4 then
       Write(Format(' %s ',[Copy(MainConsensus.lbhash,1,10)]));
       TextBackground(Black);Write('  ');
       Textcolor(white);TextBackground(green);
-      Write(Format(' %d ',[UTCTime-MainConsensus.LBTimeEnd]));
+      BlockAge := UTCTime-MainConsensus.LBTimeEnd;
+      Write(Format(' %d ',[BlockAge]));
+      if ( (BlockAge > 60) and (LastPaidBlock<MainConsensus.block) ) then
+         begin
+         RunPayments();
+         LastPaidBlock:=MainConsensus.block;
+         end;
       PrintLine(10);
       end;
    RefreshAge := UTCTime;
@@ -72,16 +82,16 @@ if number = 5 then
    TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(green);Write(SharesCount.ToString);
    TextBackground(Black);Write('  ');
-   Textcolor(white);TextBackground(green);Write(Copy(ThisBlockBest,1,10));
+   Textcolor(white);TextBackground(green);Write(BestHashReadeable(ThisBlockBest));
    UpdateServerInfo := false;
    TextBackground(Black);Write('  ');
-   Textcolor(white);TextBackground(green);Write(Copy(MainBestDiff,1,10));
+   Textcolor(white);TextBackground(green);Write(BestHashReadeable(MainBestDiff));
    PrintLine(10);
    end;
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s    %d    %d    %s',[UpTime,SESSION_BestHashes, SESSION_Shares, GetSessionSpeed]));
+   write(Format(' %s    %d    %d    %s',[UpTime,SESSION_BestHashes, SESSION_Shares, HashrateToShow(GetSessionSpeed)]));
    PrintLine(10);
    RefreshUpTime := UTCTime;
    end;
@@ -139,7 +149,7 @@ WriteLn();
 For counter := 0 to LengthNodes-1 do
    begin
    ThisNode := GetNodeIndex(Counter);
-   writeln(Format(' %d %s %d',[Counter,ThisNode.host,ThisNode.port]));
+   writeln(Format(' %2s %18s %s %6s %d',[Counter.ToString,ThisNode.host,ThisNode.port.ToString,ThisNode.block.ToString,ThisNode.LBPoW,MainConsensus.block]));
    end;
 
 WriteLn();
@@ -162,13 +172,13 @@ TextBackground(Black);TextColor(White);ClrScr();
 PrintLine(1);WriteLn();
 TextBackground(Black);TextColor(White);
 WriteLn();
-WriteLn('Nodes List: ');
+WriteLn('Block shares: ');
 WriteLn();
 EnterCriticalSection(CS_Miners);
 For counter := 0 to Length(ArrMiners)-1 do
    begin
    ThisMiner := ArrMiners[Counter];
-   writeln(Format(' %0:-40s %d ',[ThisMiner.address,ThisMiner.Shares]));
+   writeln(Format(' %0:-40s %12s %5s %d',[ThisMiner.address,Int2Curr(ThisMiner.Balance),ThisMiner.Shares.ToString,MainConsensus.block-ThisMiner.LastPay]));
    end;
 LeaveCriticalSection(CS_Miners);
 WriteLn();
@@ -198,25 +208,59 @@ var
 Begin
 if length(LogLines)>0 then
    begin
-   EnterCriticalSection(CS_LogLines);
    window(1,13,80,24);
    GotoXy(80,11);WriteLn();
    Repeat
       begin
+      EnterCriticalSection(CS_LogLines);
       Texto := LogLines[0];
       Delete(LogLines,0,1);
+      LeaveCriticalSection(CS_LogLines);
       if Texto[1] = ',' then
          begin
          TextColor(Green);
          Texto := Copy(Texto,2,length(Texto));
          end
+      else if Texto[1] = '.' then
+         begin
+         TextColor(red);
+         Texto := Copy(Texto,2,length(Texto));
+         end
+      else if Texto[1] = '/' then
+         begin
+         TextColor(yellow);
+         Texto := Copy(Texto,2,length(Texto));
+         end
       else TextColor(White);
       WriteLn(Texto);
+      RawToLog(Texto);
       end;
    until length(LogLines) = 0;
    Window(1,1,80,25);
-   LeaveCriticalSection(CS_LogLines);
    end;
+End;
+
+Procedure CloseTheApp(mensaje:string);
+Begin
+if mensaje<>'' then
+   begin
+   writeln(mensaje);
+   writeln('Press enter to close');
+   Readln;
+   end;
+PoolServer.Free;
+DoneCriticalSection(CS_UpdateScreen);
+DoneCriticalSection(CS_PrefixIndex);
+DoneCriticalSection(CS_LogLines);
+DoneCriticalSection(CS_Miners);
+DoneCriticalSection(CS_Shares);
+DoneCriticalSection(CS_BlockBest);
+DoneCriticalSection(CS_Solution);
+DoneCriticalSection(CS_PaysFile);
+DoneCriticalSection(CS_PayThreads);
+DoneCriticalSection(CS_PoolBalance);
+DoneCriticalSection(CS_LastBlockRate);
+Halt(2);
 End;
 
 BEGIN
@@ -227,6 +271,11 @@ InitCriticalSection(CS_Miners);
 InitCriticalSection(CS_Shares);
 InitCriticalSection(CS_BlockBest);
 InitCriticalSection(CS_Solution);
+InitCriticalSection(CS_PaysFile);
+InitCriticalSection(CS_PayThreads);
+InitCriticalSection(CS_PoolBalance);
+InitCriticalSection(CS_LastBlockRate);
+
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
 SetLength(ArrMiners,0);
@@ -234,10 +283,17 @@ SetLength(ArrShares,0);
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
 if not directoryexists('miners') then createdir('miners');
+if not directoryexists('blocks') then createdir('blocks');
 AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
+//*****
+//AssignFile(TempMinersFile ,'miners'+DirectorySeparator+'miners2.dat');
+//*****
 Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
+if not FileExists('blocks'+DirectorySeparator+'0.txt') then CreateBlockzero();
+if not fileExists('payments.txt') then createPaymentsFile;
+Assignfile(PaysFile,'payments.txt');
 if not FileExists('miners'+DirectorySeparator+'miners.dat') then CreateMinersFile();
 LoadMiners();
 If not ResetLogs then
@@ -249,9 +305,19 @@ if not FileExists('consopool.cfg') then SaveConfig();
 LoadConfig();
 LoadNodes;
 InitServer;
+
+if PoolAddress='' then CloseTheApp('Pool address is empty');
+if PublicKey  ='' then CloseTheApp('Public key is empty');
+if PrivateKey  ='' then CloseTheApp('Private key is empty');
+if not IsValidHashAddress(PoolAddress) then CloseTheApp('Pool address is not valid');
+if GetAddressFromPublicKey(PublicKey) <> PoolAddress then CloseTheApp('Address and public key do not match');
+if not KeysMatch(PublicKey,PrivateKey) then CloseTheApp('Keys do not match');
+
 MainConsensus := Default(TNodeData);
 LastHelpShown := DefHelpLine;
+UpdatePoolBalance;
 ToLog('********** New Session **********');
+if PoolAuto then PrintLine(11,StartPool);
 REPEAT
    REPEAT
       If ((GetSolution.Diff<MainBestDiff) and (GetSolution.Hash<>'')) then SendSolution(GetSolution);
@@ -275,9 +341,27 @@ REPEAT
          PrintLine(4);
          End;
       if RefreshUpTime <> UTCtime then PrintLine(6);
+      if RefreshPoolHeader then
+         begin
+         RefreshPoolHeader := false;
+         PrintLine(2);
+         end;
+      if RefreshPoolBalance then
+         begin
+         RefreshPoolBalance := false;
+         PrintLine(3);
+         end;
       if RefreshAge<> UTCTime then
          begin
          PrintLine(4);
+         if ( (CheckPaysThreads) and (GetPayThreads= 0) ) then
+            begin
+            CheckPaysThreads := false;
+            SaveMiners();
+            ToLog(Format('Completed payments (%d Good - %d Fail)',[GoodPayments,BadPayments]));
+            GenerateReport();
+            UpdatePoolBalance;
+            end;
          end;
       if UpdateServerInfo then PrintLine(5);
       Sleep(1);
@@ -319,7 +403,20 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'NODES' then ShowNodes
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(11,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(11,StopPool)
-      else if Uppercase(Parameter(Command,0)) = 'BLOCKSHARES' then ShowBlockShares
+      else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
+      else if Uppercase(Parameter(Command,0)) = 'LB' then ToLog(GetMyLastUpdatedBlock.ToString)
+      else if Uppercase(Parameter(Command,0)) = 'TESTPAY' then
+         begin
+         EnterCriticalSection(CS_Miners);
+         ArrMiners[0].Balance:=ArrMiners[0].Balance+1000;
+         LeaveCriticalSection(CS_Miners);
+         end
+      else if Uppercase(Parameter(Command,0)) = 'DEBT' then ToLog('Total debt: '+Int2Curr(GetTotalDebt))
+      else if Uppercase(Parameter(Command,0)) = 'REPORT' then GenerateReport
+      else if Uppercase(Parameter(Command,0)) = 'BALANCE' then
+         begin
+         ToLog(Format('Pool Address: %s',[Int2Curr(GetAddressBalance(PoolAddress))]));
+         end
       else if Uppercase(Parameter(Command,0)) = 'PREFIX' then   // Debug only
          Begin
          ToLog(GetPrefixStr(StrToIntDef(Parameter(Command,1),0)));
@@ -338,15 +435,9 @@ REPEAT
       PrintLine(10);
       end
    else if Ord(ThisChar) = 27 then FinishProgram := true;
+   sleep(1);
 UNTIL FinishProgram;
-writeln();
-PoolServer.Free;
-DoneCriticalSection(CS_UpdateScreen);
-DoneCriticalSection(CS_PrefixIndex);
-DoneCriticalSection(CS_LogLines);
-DoneCriticalSection(CS_Miners);
-DoneCriticalSection(CS_Shares);
-DoneCriticalSection(CS_BlockBest);
-DoneCriticalSection(CS_Solution);
+SaveMiners();
+CloseTheApp('');
 END.
 

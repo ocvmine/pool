@@ -2,11 +2,15 @@
 /backup
 /locale
 /logs
+/miners
+/blocks
 consopool
 consopool.cfg
 consopool.exe
 consopool.dbg
 gitinst.txt
+payments.txt
+report.txt
 *.res
 *.lps
 *.mo
