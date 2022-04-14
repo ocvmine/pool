@@ -11,6 +11,9 @@ consopool.dbg
 gitinst.txt
 payments.txt
 report.txt
+frequency.dat
+sharereport.txt
+sh
 *.res
 *.lps
 *.mo

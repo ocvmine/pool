@@ -91,7 +91,7 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s    %d    %d    %s',[UpTime,SESSION_BestHashes, SESSION_Shares, HashrateToShow(GetSessionSpeed)]));
+   write(Format(' %s    %d    %d    %s    [%s]',[UpTime,SESSION_BestHashes, SESSION_Shares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate)]));
    PrintLine(10);
    RefreshUpTime := UTCTime;
    end;
@@ -293,6 +293,8 @@ Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
 if not FileExists('blocks'+DirectorySeparator+'0.txt') then CreateBlockzero();
 if not fileExists('payments.txt') then createPaymentsFile;
+if not fileExists('frequency.dat') then SaveShareIndex;
+LoadShareIndex;
 Assignfile(PaysFile,'payments.txt');
 if not FileExists('miners'+DirectorySeparator+'miners.dat') then CreateMinersFile();
 LoadMiners();
@@ -313,9 +315,12 @@ if not IsValidHashAddress(PoolAddress) then CloseTheApp('Pool address is not val
 if GetAddressFromPublicKey(PublicKey) <> PoolAddress then CloseTheApp('Address and public key do not match');
 if not KeysMatch(PublicKey,PrivateKey) then CloseTheApp('Keys do not match');
 
+MainnetTimeStamp := GetMainnetTimestamp;
+if MainnetTimeStamp<>0 then OffSet := UTCTime-MainnetTimeStamp;
 MainConsensus := Default(TNodeData);
 LastHelpShown := DefHelpLine;
 UpdatePoolBalance;
+FillSolsArray();
 ToLog('********** New Session **********');
 if PoolAuto then PrintLine(11,StartPool);
 REPEAT
@@ -405,6 +410,9 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(11,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
       else if Uppercase(Parameter(Command,0)) = 'LB' then ToLog(GetMyLastUpdatedBlock.ToString)
+      else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
+      else if Uppercase(Parameter(Command,0)) = 'BV' then ToLog(GetBlockValue(Parameter(command,1).ToInteger,parameter(command,2)))
+      else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray
       else if Uppercase(Parameter(Command,0)) = 'TESTPAY' then
          begin
          EnterCriticalSection(CS_Miners);

@@ -1,0 +1,6 @@
+version 0.28
+
+- Time synchonization with mainnet.
+- Pool address free funds on report generation.
+- Share index tracking implemented.
+- Mainnet hashrate support implemented.

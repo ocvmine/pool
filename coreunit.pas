@@ -51,6 +51,7 @@ Function Parameter(LineText:String;ParamNumber:int64):String;
 Function UTCTime():int64;
 function Int2Curr(Value: int64): string;
 Function BestHashReadeable(BestDiff:String):string;
+Function GetDiffHashrate(bestdiff:String):integer;
 Function GetConsensus():Boolean;
 Procedure LoadNodes();
 Procedure SetMainConsensus(New:TnodeData);
@@ -86,6 +87,7 @@ function BMAdicion(numero1,numero2:string):string;
 Function PonerCeros(numero:String;cuantos:integer):string;
 //***************
 Function HashrateToShow(speed:int64):String;
+function GetMainnetTimestamp(Trys:integer=5):int64;
 
 CONST
   HasheableChars = '!"#$%&#39)*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
@@ -94,6 +96,7 @@ CONST
   HexAlphabet : string = '0123456789ABCDEF';
 
 var
+  OffSet        : int64 = 0;
   MainConsensus : TNodeData;
   SyncingThreads: Integer;
   ContactedNodes: Integer;
@@ -222,7 +225,7 @@ result := 0;
 G_TIMELocalTimeOffset := GetLocalTimeOffset*60;
 GetLocalTimestamp := DateTimeToUnix(now);
 UnixTime := GetLocalTimestamp+G_TIMELocalTimeOffset;
-result := UnixTime;
+result := UnixTime-Offset;
 End;
 
 function Int2Curr(Value: int64): string;
@@ -243,6 +246,22 @@ repeat
 until bestdiff[counter]<> '0';
 Result := (Counter-1).ToString+'.';
 if counter<length(BestDiff) then Result := Result+bestdiff[counter];
+End;
+
+Function GetDiffHashrate(bestdiff:String):integer;
+var
+  counter :integer = 0;
+Begin
+result := 0;
+repeat
+  counter := counter+1;
+until bestdiff[counter]<> '0';
+Result := (Counter-1)*100;
+if bestdiff[counter]='1' then Result := Result+87;
+if bestdiff[counter]='2' then Result := Result+75;
+if bestdiff[counter]='3' then Result := Result+50;
+if bestdiff[counter]='4' then Result := Result+37;
+if bestdiff[counter]='5' then Result := Result+25;
 End;
 
 Function GetConsensus():Boolean;
@@ -910,6 +929,38 @@ if speed>1000000000 then result := FormatFloat('0.00',speed/1000000000)+' Gh/s'
 else if speed>1000000 then result := FormatFloat('0.00',speed/1000000)+' Mh/s'
 else if speed>1000 then result := FormatFloat('0.00',speed/1000)+' Kh/s'
 else result := speed.ToString+' h/s'
+End;
+
+function GetMainnetTimestamp(Trys:integer=5):int64;
+var
+  Client : TidTCPClient;
+  RanNode : integer;
+  ThisNode : TNodeData;
+  WasDone : boolean = false;
+Begin
+Result := 0;
+REPEAT
+   RanNode := Random(LengthNodes);
+   ThisNode := GetNodeIndex(RanNode);
+   Client := TidTCPClient.Create(nil);
+   Client.Host:=ThisNode.host;
+   Client.Port:=ThisNode.port;
+   Client.ConnectTimeout:= 3000;
+   Client.ReadTimeout:= 3000;
+   TRY
+   Client.Connect;
+   Client.IOHandler.WriteLn('NSLTIME');
+   Result := StrToInt64Def(Client.IOHandler.ReadLn(IndyTextEncoding_UTF8),0);
+   WasDone := true;
+   EXCEPT on E:Exception do
+      begin
+      WasDone := False;
+      end;
+   END{Try};
+Inc(Trys);
+UNTIL ( (WasDone) or (Trys = 5) );
+if client.Connected then Client.Disconnect();
+client.Free;
 End;
 
 INITIALIZATION

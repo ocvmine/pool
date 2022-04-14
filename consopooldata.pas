@@ -109,10 +109,20 @@ Procedure UpdatePoolBalance();
 // LAstBlockRate
 Procedure SetLastBlockRate(ThisValue:int64);
 Function GetLastBlockRate():Int64;
+// ShareIndex
+Procedure SaveShareIndex();
+Procedure LoadShareIndex();
+Procedure CreditFrequency(Diff : string);
+Procedure ShareIndexReport();
+// Mainnet hashrate
+Function GetBlockValue(Block:integer;valuename:string):string;
+Procedure FillSolsArray();
+Procedure CalculateMainNetHashrate();
+
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.27';
+  AppVersion = 'v0.29';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -132,6 +142,8 @@ VAR
   PoolAuto     : boolean = true;
   AutoDiff     : boolean = true;
   // Operative
+  ArraySols    : array of integer;
+  ShareIndex   : array[0..15] of integer;
   Command      : string  = '';
   ThisChar     : Char;
   LastHelpShown: String = '';
@@ -146,11 +158,13 @@ VAR
     RefreshPoolHeader  : boolean = false;
   LogLines     : Array of String;
   NewLogLines  : Array of string;
+  MainnetTimeStamp : int64 = 0;
   // Mainnet
   LastConsensusTry: int64   = 0;
   WaitingConsensus:Boolean = false;
   CurrentBlock    : integer = 0;
   MainBestDiff    : String = DefWorst;
+  MainnetHashRate : int64 = 0;
   // Pool
   PoolBalance      : int64 = 0;
   CheckPaysThreads : Boolean = false;
@@ -619,6 +633,7 @@ else
       Result := 0;
       AddShare(Share+Address);
       CreditShare(Address);
+      CreditFrequency(ThisDiff);
       Inc(SESSION_Shares);
       UpdateServerInfo := true;
       if ThisDiff<MainBestDiff then
@@ -803,6 +818,7 @@ ToLog('Server started at port '+PoolPort.ToString);
 SESSION_Started := UTCTime;
 SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
 ToLog('Hashes Per Share : '+SESSION_HashPerShare.ToString);
+if Offset <> 0 then ToLog('Time offset : '+Offset.ToString);
 EXCEPT ON E:Exception do
    Result := E.Message;
 END; {TRY}
@@ -865,11 +881,11 @@ repeat
   counter := counter+1;
 until bestdiff[counter]<> '0';
 Result := (Counter-1)*100;
-if bestdiff[counter]='1' then Result := Result+50;
-if bestdiff[counter]='2' then Result := Result+25;
-if bestdiff[counter]='3' then Result := Result+12;
-if bestdiff[counter]='4' then Result := Result+6;
-if bestdiff[counter]='5' then Result := Result+3;
+if bestdiff[counter]='1' then Result := Result+87;
+if bestdiff[counter]='2' then Result := Result+75;
+if bestdiff[counter]='3' then Result := Result+50;
+if bestdiff[counter]='4' then Result := Result+37;
+if bestdiff[counter]='5' then Result := Result+25;
 End;
 
 Function GetSessionSpeed(): int64;
@@ -1035,7 +1051,7 @@ for counter2 := 0 to length(finalArray)-1 do
    writeln(ReportFile,format('%35s %s',[AddText,BalanText]));
    end;
 CloseFile(ReportFile);
-ToLog('/Report file Generated');
+ToLog(format('/Report file Generated [ %s ]',[Int2Curr(GetAddressBalance(PoolAddress)-BalanceTotal)]));
 End;
 
 Procedure BuildNewBlock();
@@ -1073,6 +1089,9 @@ EXCEPT ON E:Exception do
 END; {TRY}
 SaveMiners();
 UpdatePoolBalance;
+Insert(GetDiffHashrate(GetMainConsensus.LBSolDiff),ArraySols,length(ArraySols));
+Delete(ArraySols,0,1);
+CalculateMainNetHashrate;
 if AutoDiff then
    begin
    if TotalShares<100 then
@@ -1109,6 +1128,7 @@ SetBlockBest(DefWorst);
 SetSolution(Default(TSolution));
 SESSION_Shares := 0;
 SESSION_Started := UTCTime;
+SaveShareIndex;
 End;
 
 Function GetPrefixIndex():Integer;
@@ -1230,7 +1250,8 @@ If UpperCase(Command) = 'SOURCE' then
                                             {6}MinBal.ToString+' '+
                                             {7}MinTill.ToString+' '+
                                             {8}MinPay+' '+
-                                            {9}GetLastBlockRate.ToString);
+                                            {9}GetLastBlockRate.ToString+' '+
+                                            {10}MainnetHashRate.ToString);
       end;
    end
 else If UpperCase(Command) = 'SHARE' then
@@ -1375,6 +1396,169 @@ Begin
 EnterCriticalSection(CS_LastBlockRate);
 Result := LastBlockRate;
 LeaveCriticalSection(CS_LastBlockRate);
+End;
+
+Procedure SaveShareIndex();
+var
+  ThisFile : File of integer;
+  counter : integer;
+Begin
+Assignfile(ThisFile, 'frequency.dat');
+TRY
+Rewrite(ThisFile);
+for counter := 0 to 15 do
+   begin
+   Seek(ThisFile,counter);
+   Write(ThisFile,ShareIndex[counter]);
+   end;
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION DO
+   ToLog('Error saving share index: '+E.Message);
+END;{TRY}
+ShareIndexReport;
+End;
+
+Procedure LoadShareIndex();
+var
+  ThisFile : File of integer;
+  counter : integer;
+Begin
+Assignfile(ThisFile, 'frequency.dat');
+TRY
+reset(ThisFile);
+for counter := 0 to 15 do
+   begin
+   Seek(ThisFile,counter);
+   Read(ThisFile,ShareIndex[counter]);
+   end;
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION DO
+   ToLog('Error loading share index: '+E.Message);
+END;{TRY}
+End;
+
+Procedure CreditFrequency(Diff : string);
+var
+  DiffLen  : integer;
+  ThisChar : String;
+  ThisValue : integer;
+Begin
+TRY
+DiffLen := Length(MinDiffBase)+1;
+ThisChar := Diff[Difflen];
+ThisValue := Hex2Dec(ThisChar);
+Inc(ShareIndex[ThisValue]);
+EXCEPT ON E:EXCEPTION DO
+   ToLog('Error crediting frequency: '+E.Message);
+END;{TRY}
+End;
+
+Procedure ShareIndexReport();
+var
+  counter  : integer;
+  ThisFile : textfile;
+  text1, text2, text3 : string;
+  TotalShares : integer = 0;
+Begin
+TRY
+Assignfile(ThisFile, 'sharereport.txt');
+for counter := 1 to 15 do
+   TotalShares := TotalShares+shareindex[counter];
+rewrite(ThisFile);
+writeln(ThisFile,format('TotalShares: %d',[TotalShares]));
+for counter := 1 to 15 do
+   begin
+   Text1 := Uppercase(IntToHex(counter,1));
+   Text2 := Format('%0:5d',[shareindex[counter]]);
+   Text3 := formatFloat('0.00',(shareindex[counter]*100)/totalshares)+'%';
+   Text3 := Format('%0:6s',[Text3]);
+   writeln(ThisFile,format('%s %s %s',[text1,text2,text3]));
+   end;
+CloseFile(ThisFile);
+ToLog('Share index report created');
+EXCEPT ON E:EXCEPTION do
+   ToLog('Error saving sharereport.txt: '+E.message);
+END;{TRY}
+End;
+
+Function GetBlockValue(Block:integer;valuename:string):string;
+var
+  ThisFile : Textfile;
+  FileName : string;
+  Texto    : string;
+Begin
+Result := '';
+FileName := 'blocks'+DirectorySeparator+Block.ToString+'.txt';
+If fileExists(FileName) then
+   begin
+   AssignFile(ThisFile,Filename);
+   TRY
+   Reset(ThisFile);
+   while not Eof(thisfile) do
+      begin
+      Readln(ThisFile,Texto);
+      Texto := DelSpace1(Texto);
+      if Uppercase(Parameter(texto,0)) = UpperCase(Valuename) then
+         begin
+         result := Parameter(texto,2);
+         SeekEof(ThisFile);
+         end;
+      end;
+   CloseFile(ThisFile);
+   EXCEPT ON E:EXCEPTION do
+      ToLog('Error getting block value: '+E.Message);
+   END;{TRY}
+   end
+else
+   begin
+   //ToLog('Block do not exists: '+FileName);
+   end;
+End;
+
+Procedure FillSolsArray();
+var
+  counter        : integer;
+  ThisBlockDiff  : string;
+  ThisBlockValue : integer;
+  LastBlock  : integer;
+Begin
+SetLength(ArraySols,0);
+LastBlock := GetMyLastUpdatedBlock;
+for counter := LastBlock-99 to LastBlock do
+   begin
+   ThisBlockDiff := GetBlockValue(counter,'SolDiff');
+   if thisblockDiff = '' then thisblockDiff := DefWorst;
+   ThisBlockValue := GetDiffHashrate(thisblockDiff);
+   Insert(ThisBlockValue,ArraySols,length(ArraySols));
+   end;
+CalculateMainNetHashrate;
+{
+//ToLog('TotalValue: '+TotalValue.ToString);
+//ToLog('Processed: '+Processed.ToString);
+TotalRate := (TotalValue/100)/Processed;
+//ToLog('TotalRate: '+TotalRate.ToString);
+TotalRate := Power(16,TotalRate);
+//ToLog('TotalRate: '+TotalRate.ToString);
+TotalRate := TotalRate/(575);
+MainnetHashRate := Round(TotalRate);
+ToLog('Mainnet hashrate: '+HashrateToShow(MainnetHashRate));
+}
+End;
+
+Procedure CalculateMainNetHashrate();
+var
+  counter        : integer;
+  TotalValue     : integer = 0;
+  TotalRate : double = 0;
+Begin
+for counter := 0 to length(ArraySols)-1 do
+   TotalValue := TotalValue+ArraySols[counter];
+//ToLog('Registers: '+length(ArraySols).ToString);
+TotalRate := (TotalValue/100)/length(ArraySols);
+//ToLog('TotalRate: '+TotalRate.ToString);
+TotalRate := Power(16,TotalRate);
+TotalRate := TotalRate/(575);
+MainnetHashRate := Round(TotalRate);
 End;
 
 END. // End unit

@@ -94,7 +94,7 @@
         <PackageName Value="indylaz"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="3">
+    <Units Count="4">
       <Unit0>
         <Filename Value="consopool.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -107,6 +107,10 @@
         <Filename Value="coreunit.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit2>
+      <Unit3>
+        <Filename Value="changelog.txt"/>
+        <IsPartOfProject Value="True"/>
+      </Unit3>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
