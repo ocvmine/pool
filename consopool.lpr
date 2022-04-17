@@ -413,6 +413,12 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
       else if Uppercase(Parameter(Command,0)) = 'BV' then ToLog(GetBlockValue(Parameter(command,1).ToInteger,parameter(command,2)))
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray
+      else if Uppercase(Parameter(Command,0)) = 'SAVE' then
+         begin
+         SaveMiners;
+         ToLog('Miners File saved');
+         end
+
       else if Uppercase(Parameter(Command,0)) = 'TESTPAY' then
          begin
          EnterCriticalSection(CS_Miners);

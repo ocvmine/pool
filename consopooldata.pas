@@ -122,7 +122,7 @@ Procedure CalculateMainNetHashrate();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.29';
+  AppVersion = 'v0.31';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -242,6 +242,15 @@ Begin
 Balance := GetMinerBalance(address);
 Fee     := GetFee(Balance);
 ToSend  := Balance - Fee;
+if ToSend<=0 then
+   begin
+   LastPayInfo := (GetMainConsensus.block+1).ToString+':'+ToSend.ToString+':'+'TooSmallAmount';
+   ClearAddressBalance(Address, LastPayInfo);
+   AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
+   WasGood := true;
+   DecreasePayThreads(WasGood);
+   exit;
+   end;
 TrxTime := UTCTime;
 trfHash := GetTransferHash(TrxTime.ToString+PoolAddress+address+ToSend.ToString+IntToStr(GetMainConsensus.block));
 OrdHash := GetOrderHash(TrxTime.ToString+'1'+trfHash);
@@ -255,6 +264,7 @@ TextToSend := 'NSLORDER 1 0.16 '+TrxTime.ToString+' ORDER 1 $TRFR '+OrdHash+' 1 
 Resultado  := SendOrder(TextToSend);
 if Resultado <> '' then
    begin
+   //ToLog(OrdHash+'->'+Resultado);
    LastPayInfo := (GetMainConsensus.block+1).ToString+':'+ToSend.ToString+':'+Resultado;
    ClearAddressBalance(Address, LastPayInfo);
    AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
@@ -357,6 +367,7 @@ End;
 Procedure SaveMiners();
 var
   Counter : integer;
+  AlreadyAdded : string = '';
   //ThisTemp : TMinersData2;
 Begin
 EnterCriticalSection(CS_Miners);
@@ -367,7 +378,11 @@ for counter := 0 to length(ArrMiners)-1 do
    begin
    if ( (ArrMiners[counter].Shares>0) or (ArrMiners[counter].Balance>0) ) then
       begin
-      write(MinersFile,ArrMiners[counter]);
+      if not AnsiContainsStr(AlreadyAdded,ArrMiners[counter].address) then
+         begin
+         write(MinersFile,ArrMiners[counter]);
+         AlreadyAdded := AlreadyAdded+ArrMiners[counter].address+',';
+         end;
       {
       ThisTemp.address:=ArrMiners[counter].address;
       ThisTemp.Shares:=ArrMiners[counter].Shares;
@@ -388,6 +403,7 @@ EXCEPT ON E:EXCEPTION do
    end;
 END {TRY};
 LeaveCriticalSection(CS_Miners);
+LoadMiners;
 End;
 
 Procedure CreateBlockzero();
@@ -451,11 +467,14 @@ var
   ThisData : TMinersData;
 Begin
 reset(MinersFile);
+EnterCriticalSection(CS_Miners);
+SetLength(ArrMiners,0);
 While not eof(MinersFile) do
    begin
    read(MinersFile,ThisData);
    Insert(ThisData,ArrMiners,Length(ArrMiners));
    end;
+LeaveCriticalSection(CS_Miners);
 CloseFile(MinersFile);
 End;
 
@@ -881,11 +900,10 @@ repeat
   counter := counter+1;
 until bestdiff[counter]<> '0';
 Result := (Counter-1)*100;
-if bestdiff[counter]='1' then Result := Result+87;
-if bestdiff[counter]='2' then Result := Result+75;
-if bestdiff[counter]='3' then Result := Result+50;
-if bestdiff[counter]='4' then Result := Result+37;
-if bestdiff[counter]='5' then Result := Result+25;
+if bestdiff[counter]='1' then Result := Result+50;
+if bestdiff[counter]='2' then Result := Result+25;
+if bestdiff[counter]='3' then Result := Result+12;
+if bestdiff[counter]='4' then Result := Result+6;
 End;
 
 Function GetSessionSpeed(): int64;
