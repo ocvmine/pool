@@ -6,7 +6,7 @@ INTERFACE
 
 USES
   Classes, SysUtils, dateutils, IdTCPClient, IdGlobal, MD5, StrUtils, mpsignerutils,
-  base64, HlpHashFactory;
+  base64, HlpHashFactory, nosodig.crypto;
 
 TYPE
 
@@ -59,9 +59,9 @@ Function GetMainConsensus():TNodeData;
 Function GetNodeIndex(Index:integer):TNodeData;
 Procedure CloseSyncingThread();
 Function SyncingThreadsValue():Integer;
-Function NosoHash(source:string):string;
+Function NosoHashOld(source:string):string;
 Function HashMD5String(StringToHash:String):String;
-Function CheckHashDiff(Target,ThisHash:String):string;
+Function CheckHashDiffOld(Target,ThisHash:String):string;
 //*** CRYPTO FUNCTIONS ***
 Function KeysMatch(PublicK,PrivateK:String):boolean;
 function GetStringSigned(StringtoSign, PrivateKey:String):String;
@@ -441,7 +441,7 @@ Result := SyncingThreads;
 LeaveCriticalSection(CS_CSThread);
 End;
 
-Function NosoHash(source:string):string;
+Function NosoHashOld(source:string):string;
 var
   counter : integer;
   FirstChange : array[1..128] of string;
@@ -512,7 +512,7 @@ Begin
 result := Uppercase(MD5Print(MD5String(StringToHash)));
 end;
 
-Function CheckHashDiff(Target,ThisHash:String):string;
+Function CheckHashDiffOld(Target,ThisHash:String):string;
 var
    counter : integer;
    ValA, ValB, Diference : Integer;

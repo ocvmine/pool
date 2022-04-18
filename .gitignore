@@ -4,6 +4,7 @@
 /logs
 /miners
 /blocks
+/addresses
 consopool
 consopool.cfg
 consopool.exe

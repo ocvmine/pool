@@ -94,7 +94,7 @@
         <PackageName Value="indylaz"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="4">
+    <Units Count="5">
       <Unit0>
         <Filename Value="consopool.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -111,6 +111,11 @@
         <Filename Value="changelog.txt"/>
         <IsPartOfProject Value="True"/>
       </Unit3>
+      <Unit4>
+        <Filename Value="nosodig.crypto.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="NosoDig.Crypto"/>
+      </Unit4>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

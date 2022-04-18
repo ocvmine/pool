@@ -6,7 +6,7 @@ USES
   {$IFDEF UNIX}
    cthreads,
   {$ENDIF}
-  Classes, SysUtils, CRT, consopooldata, coreunit
+  Classes, SysUtils, CRT, consopooldata, coreunit, NosoDig.Crypto
   { you can add units after this };
 
 // Prints the specified line of the screen
@@ -31,7 +31,7 @@ if number = 2 then
    Textcolor(white);TextBackground(Green);Write(Format(' %d ',[PoolPay]));
    TextBackground(Black);Write('  ');
    if AutoDiff then TextBackground(Green) else TextBackground(Red);
-   Textcolor(white);Write(Format(' %s ',[MinDiffBase]));
+   Textcolor(white);Write(Format(' %s [%d] ',[MinDiffBase, AutoValue]));
    end;
 if number = 3 then
    begin
@@ -91,7 +91,7 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s    %d    %d    %s    [%s]',[UpTime,SESSION_BestHashes, SESSION_Shares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate)]));
+   write(Format(' %s  %d  %d  %s  [%s]  [%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool]));
    PrintLine(10);
    RefreshUpTime := UTCTime;
    end;
@@ -284,6 +284,7 @@ ClrScr;
 if not directoryexists('logs') then createdir('logs');
 if not directoryexists('miners') then createdir('miners');
 if not directoryexists('blocks') then createdir('blocks');
+if not directoryexists('addresses') then createdir('addresses');
 AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
 //*****
 //AssignFile(TempMinersFile ,'miners'+DirectorySeparator+'miners2.dat');
@@ -294,7 +295,7 @@ Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
 if not FileExists('blocks'+DirectorySeparator+'0.txt') then CreateBlockzero();
 if not fileExists('payments.txt') then createPaymentsFile;
 if not fileExists('frequency.dat') then SaveShareIndex;
-LoadShareIndex;
+if StoreShares then LoadShareIndex;
 Assignfile(PaysFile,'payments.txt');
 if not FileExists('miners'+DirectorySeparator+'miners.dat') then CreateMinersFile();
 LoadMiners();
@@ -411,8 +412,10 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
       else if Uppercase(Parameter(Command,0)) = 'LB' then ToLog(GetMyLastUpdatedBlock.ToString)
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
-      else if Uppercase(Parameter(Command,0)) = 'BV' then ToLog(GetBlockValue(Parameter(command,1).ToInteger,parameter(command,2)))
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray
+      else if Uppercase(Parameter(Command,0)) = 'POOLINFO' then
+         ToLog(minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString)
+
       else if Uppercase(Parameter(Command,0)) = 'SAVE' then
          begin
          SaveMiners;

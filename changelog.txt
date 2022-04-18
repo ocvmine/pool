@@ -1,3 +1,18 @@
+Version 0.33
+
+- Valid hash address filters implemented.
+
+version 0.32
+
+- Added shares to the report.
+- Save all miners paid on lasts 36 blocks.
+- Pool mined blocks count.
+- Poolinfo implemented.
+- Crypto unit included to speed processing of shares.
+- StoreShares set to false. (Need to be removed)
+- AutoValue to adjust the diff change.
+- Payments saved to address file.
+
 version 0.28
 
 - Time synchonization with mainnet.
