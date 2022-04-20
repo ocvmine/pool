@@ -45,6 +45,12 @@ Type
     LastPayOrder : String[120];
     end;
 
+   TCounter = Packed record
+    data         : string[60];
+    counter      : integer;
+    end;
+
+
 Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
 function SendOrder(OrderString:String):String;
 function GetAddressBalance(Address:String):int64;
@@ -65,7 +71,7 @@ Procedure AddShare(Share:string);
 Function SharesCount():Integer;
 Function ShareAlreadyExists(Share:string):boolean;
 Procedure CreditShare(Address:String);
-Function ShareIsValid(Share,Address:String):integer;
+Function ShareIsValid(Share,Address,MinerProgram,IPUser:String):integer;
 
 Procedure SetSolution(Data:TSolution);
 Function GetSolution():TSolution;
@@ -85,7 +91,7 @@ Function UpTime():string;
 Function StopPool():String;
 Function GetDiffHashrate(bestdiff:String):integer;
 Function GetSessionSpeed(): int64;
-Procedure ToLog(Texto:string);
+Procedure ToLog(Texto:string;ShowOnScreen:boolean = true);
 Function GetBlockBest():String;
 Procedure SetBlockBest(ThisValue:String);
 Function DistributeBlockPayment():string;
@@ -119,11 +125,12 @@ Function GetBlockValue(Block:integer;valuename:string):string;
 Procedure FillSolsArray();
 Procedure CalculateMainNetHashrate();
 Procedure GetBlocksMinedByPool();
+// Debug Counters
 
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.33';
+  AppVersion = 'v0.35';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -165,6 +172,7 @@ VAR
   LogLines     : Array of String;
   NewLogLines  : Array of string;
   MainnetTimeStamp : int64 = 0;
+  RejectedShares   : integer = 0;
   // Mainnet
   LastConsensusTry : int64   = 0;
   WaitingConsensus :Boolean = false;
@@ -245,6 +253,7 @@ var
   Resultado  : String = '';
   WasGood    : boolean = false;
   LastPayInfo: string = '';
+  ErrorCode  : integer = 0;
 Begin
 Balance := GetMinerBalance(address);
 Fee     := GetFee(Balance);
@@ -278,13 +287,18 @@ TextToSend := 'NSLORDER 1 0.16 '+TrxTime.ToString+' ORDER 1 $TRFR '+OrdHash+' 1 
               ' Pool_Payment 1 '+PublicKey+' '+PoolAddress+' '+Address+' '+Fee.ToString+' '+ToSend.ToString+' '+
               SignString+' '+trfHash;
 Resultado  := SendOrder(TextToSend);
-if Resultado <> '' then
+if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') ) then
    begin
-   //ToLog(OrdHash+'->'+Resultado);
+
    LastPayInfo := (GetMainConsensus.block+1).ToString+':'+ToSend.ToString+':'+Resultado;
    ClearAddressBalance(Address, LastPayInfo);
    AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
    WasGood := true;
+   end
+else
+   begin
+   ErrorCode := StrToIntDef(Parameter(Resultado,0),-1);
+   ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString,false);
    end;
 DecreasePayThreads(WasGood);
 End;
@@ -306,7 +320,7 @@ Writeln(ThisFile,Format('%s %s %s',[block,monto,OrderID]));
 CloseFile(ThisFile);
 EXCEPT on E:Exception do
    begin
-   ToLog('Error saving payment to address file: '+destino+'->'+E.Message);
+   ToLog(' Error saving payment to address file: '+destino+'->'+E.Message);
    end;
 END{Try};
 End;
@@ -329,7 +343,7 @@ REPEAT
    Client.Port:=ThisNode.port;
    Client.ConnectTimeout:= 3000;
    Client.ReadTimeout:=3000;
-   //Tolog(OrderString);
+
    TRY
    Client.Connect;
    Client.IOHandler.WriteLn(OrderString);
@@ -370,7 +384,7 @@ REPEAT
    WasDone := true;
    EXCEPT on E:Exception do
       begin
-      ToLog('Error getting address balance: '+E.Message);
+
       WasDone := False;
       end;
    END{Try};
@@ -477,7 +491,7 @@ BlockFiles := TStringList.Create;
       end;
    Result := LastBlock;
    EXCEPT on E:Exception do
-      tolog ('Error getting my last updated block');
+      tolog (' Error getting my last updated block');
    END; {TRY}
 BlockFiles.Free;
 end;
@@ -647,7 +661,7 @@ Result := BestPoolSolution;
 LeaveCriticalSection(CS_Solution);
 End;
 
-Function ShareIsValid(Share,Address:String):integer;
+Function ShareIsValid(Share,Address,MinerProgram,IPUser:String):integer;
 var
   ThisHash, ThisDiff : string;
   ThisSolution : TSolution;
@@ -655,13 +669,15 @@ Begin
 Result := 0;
 if ShareAlreadyExists(Share) then
    begin
-   ToLog('Duplicated: '+share);
+   ToLog(Format(' Error 4 [%s] [%s]',[MinerProgram,IPUser]));
    result := 4;
+   Inc(RejectedShares);
    end
 else if ((length(Share)<18) or (length(Share)>33)) then
    begin
-   ToLog('WrongLength: '+share);
+   ToLog(Format(' Error 7 [%s] [%s]',[MinerProgram,IPUser]));
    result := 7;
+   Inc(RejectedShares);
    end
 else
    begin
@@ -694,7 +710,8 @@ else
    else
       begin
       result := 5;
-      //ToLog('Invalid share: '+ThisDiff);
+      ToLog(Format(' Error 5 [%s] [%s]',[MinerProgram,IPUser]),false);
+      Inc(RejectedShares);
       end;
    end;
 End;
@@ -706,12 +723,12 @@ var
 Begin
 result := true;
 TRY
-If not FileExists('oldlogs.txt') then
+If not FileExists('logs'+DirectorySeparator+'oldlogs.txt') then
    Begin
    Rewrite(OldLogFile);
    CloseFile(OldLogFile);
    end;
-If not FileExists('log.txt') then
+If not FileExists('logs'+DirectorySeparator+'log.txt') then
    Begin
    Rewrite(logfile);
    CloseFile(logfile);
@@ -728,7 +745,10 @@ CloseFile(OldLogFile);
 Rewrite(LogFile);
 CloseFile(LogFile);
 EXCEPT ON E:Exception do
+   begin
    Result := false;
+   ToLog(' RESETLOGS: '+E.Message);
+   end;
 END {Try};
 End;
 
@@ -740,7 +760,6 @@ WriteLn(LogFile,Linea);
 CloseFile(LogFile);
 EXCEPT ON E:EXCEPTION do
    begin
-
    end;
 END {TRY};
 End;
@@ -856,11 +875,11 @@ PoolServer.DefaultPort:=PoolPort;
 PoolServer.Active:=true;
 Success := true;
 MinerDiff := AddCharR('F',MinDiffBase,32);
-ToLog('Server started at port '+PoolPort.ToString);
+ToLog(' Server started at port '+PoolPort.ToString);
 SESSION_Started := UTCTime;
 SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
-ToLog('Hashes Per Share : '+SESSION_HashPerShare.ToString);
-if Offset <> 0 then ToLog('Time offset : '+Offset.ToString);
+ToLog(' Hashes Per Share : '+SESSION_HashPerShare.ToString);
+if Offset <> 0 then ToLog('.Time offset : '+Offset.ToString);
 EXCEPT ON E:Exception do
    Result := E.Message;
 END; {TRY}
@@ -937,27 +956,16 @@ Seconds := UTCTime-SESSION_Started;
 Result := (SESSION_HashPerShare*SESSION_Shares) div (seconds+1);
 End;
 
-Procedure ToLog(Texto:string);
+Procedure ToLog(Texto:string;ShowOnScreen:boolean = true);
 Begin
-if Texto[1] = ',' then
+Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
+if not ShowOnScreen then RawToLog(copy(Texto,2, length(texto)))
+else
    begin
-   Texto := copy(Texto,2, length(texto));
-   Texto := ','+DateTimeToStr(now)+' '+Texto;
-   end
-else if Texto[1] = '.' then
-   begin
-   Texto := copy(Texto,2, length(texto));
-   Texto := '.'+DateTimeToStr(now)+' '+Texto;
-   end
-else if Texto[1] = '/' then
-   begin
-   Texto := copy(Texto,2, length(texto));
-   Texto := '/'+DateTimeToStr(now)+' '+Texto;
-   end
-else Texto := DateTimeToStr(now)+' '+Texto;
-EnterCriticalSection(CS_LogLines);
-Insert(Texto,LogLines,Length(LogLines));
-LeaveCriticalSection(CS_LogLines);
+   EnterCriticalSection(CS_LogLines);
+   Insert(Texto,LogLines,Length(LogLines));
+   LeaveCriticalSection(CS_LogLines);
+   end;
 End;
 
 Function GetBlockBest():String;
@@ -1035,7 +1043,7 @@ For counter := 0 to length(CopyArray)-1 do
    end;
 if PayingAddresses>0 then
    begin
-   ToLog(Format('Paying to %d addresses : %s',[PayingAddresses,Int2Curr(TotalToPay)]));
+   ToLog(Format(' Paying to %d addresses : %s',[PayingAddresses,Int2Curr(TotalToPay)]));
    SetPayThreads(PayingAddresses);
    CheckPaysThreads := true;
    end
@@ -1129,7 +1137,7 @@ TRY
       ToLog('.Block mined: '+number.ToString);
       end;
    CloseFile(BlockFile);
-   ToLog(Format('Created block : %s [Debt: %s]',[number.ToString,Int2Curr(GetTotalDebt)]))
+   ToLog(Format(' Created block : %s [Debt: %s]',[number.ToString,Int2Curr(GetTotalDebt)]))
 EXCEPT ON E:Exception do
 END; {TRY}
 SaveMiners();
@@ -1176,6 +1184,7 @@ SetBlockBest(DefWorst);
 SetSolution(Default(TSolution));
 SESSION_Shares := 0;
 SESSION_Started := UTCTime;
+RejectedShares := 0;
 if StoreShares then SaveShareIndex;
 End;
 
@@ -1224,7 +1233,7 @@ TRY
 Acontext.Connection.IOHandler.WriteLn(message);
 EXCEPT on E:Exception do
    begin
-   ToLog('Error sending message to miner: '+E.Message);
+   ToLog(' Error sending message to miner: '+E.Message);
    end;
 END;{Try}
 End;
@@ -1241,7 +1250,7 @@ Acontext.Connection.IOHandler.InputBuffer.Clear;
 AContext.Connection.Disconnect;
 AContext.Connection.IOHandler.DiscardAll(); // ?? is valid
 EXCEPT on E:Exception do
-   ToLog('Error closing miner conneciton: '+E.Message);
+   ToLog(' Error closing miner conneciton: '+E.Message);
 END;{Try}
 End;
 
@@ -1259,7 +1268,10 @@ var
     MinBal : int64;
     MinTill: integer;
     MinPay : string;
+  MinerDevice     : string = '';
 Begin
+//*******************
+// IMPLEMENT TIME FILTER WITH BLOCKAGE
 IPUser := AContext.Connection.Socket.Binding.PeerIP;
 Linea := '';
 TRY
@@ -1278,10 +1290,9 @@ EXCEPT On E:Exception do
 END{Try};
 Command := Parameter(Linea,0);
 Address := Parameter(Linea,1);
-//ToLog('Line received from '+IPUser+'->'+Linea);
 If UpperCase(Command) = 'SOURCE' then
    begin
-   if not IsValidHashAddress(Address) then
+   if ( (not IsValidHashAddress(Address)) or (address = '') ) then
       begin
       TryClosePoolConnection(AContext,'WRONG_ADDRESS');
       exit;
@@ -1294,7 +1305,7 @@ If UpperCase(Command) = 'SOURCE' then
       MinPay := Parameter(MinerData,2);
       // 1{MinerPrefix} 2{MinerAddress} 3{PoolMinDiff} 4{LBHash} 5{LBNumber} 6{MinerBalance}
       // 7{TillPayment} 8{LastPayInfo} 9{LastBlockPoolHashrate} {10}MainnetHashRate {11}PoolFee
-      //ToLog('Miner from '+IPUser);
+
       TryClosePoolConnection(AContext,'OK '+{1}GetPrefixStr+' '+
                                             {2}PoolAddress+' '+
                                             {3}MinerDiff+' '+
@@ -1310,17 +1321,19 @@ If UpperCase(Command) = 'SOURCE' then
    end
 else If UpperCase(Command) = 'SHARE' then
    begin
-   ThisShare := Parameter(Linea,2);
-   ValidShareValue := ShareIsValid(ThisShare,Address);
+   ThisShare   := Parameter(Linea,2);
+   MinerDevice := Parameter(Linea,3);
+   if MinerDevice = '' then MinerDevice:='Unknown';
+   ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser);
    if ValidShareValue=0 then
       begin
       TryClosePoolConnection(AContext,'True');
-      //ToLog('Valid share from '+Address);
+
       end
    else
       begin
       TryClosePoolConnection(AContext,'False '+ValidShareValue.ToString);
-      //ToLog(Format('Wrong Share: %s (%s)',[ValidShareValue.ToString,IPUser]));
+
       end
    end
 {
@@ -1335,7 +1348,7 @@ else If UpperCase(Command) = 'POOLINFO' then
    end
 else
    begin
-   TryClosePoolConnection(AContext);
+   TryClosePoolConnection(AContext,'Unknown :'+Linea);
    end;
 End;
 
@@ -1362,7 +1375,7 @@ Trys :=+1;
 TRY
 TCPclient.Connect;
 TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+PoolAddress+' '+GetSolution.Hash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
-//ToLog('BESTHASH -> '+Data.Diff);
+
 
 Resultado := TCPclient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
 TCPclient.Disconnect();
@@ -1380,16 +1393,16 @@ If success then
    ErrorCode := Parameter(Resultado,2);
    Mainnetbest := Parameter(Resultado,1);
    MainBestDiff := Mainnetbest;
-   //ToLog('MAINNET  -> '+Mainnetbest+' '+ErrorCode);
+
    if WasGood then
       begin
-      ToLog(',Besthash submited: '+Data.Diff);
+      ToLog(',Besthash submited: '+BestHashReadeable(Data.Diff));
       Inc(SESSION_BestHashes);
       end;
    end
 else
    begin
-   ToLog('Unable to send solution');
+   ToLog(' Unable to send solution');
    SetSolution(GetSolution);
    end;
 End;
@@ -1471,7 +1484,7 @@ for counter := 0 to 15 do
    end;
 CloseFile(ThisFile);
 EXCEPT ON E:EXCEPTION DO
-   ToLog('Error saving share index: '+E.Message);
+   ToLog(' Error saving share index: '+E.Message);
 END;{TRY}
 if StoreShares then ShareIndexReport;
 End;
@@ -1491,7 +1504,7 @@ for counter := 0 to 15 do
    end;
 CloseFile(ThisFile);
 EXCEPT ON E:EXCEPTION DO
-   ToLog('Error loading share index: '+E.Message);
+   ToLog(' Error loading share index: '+E.Message);
 END;{TRY}
 End;
 
@@ -1507,7 +1520,7 @@ ThisChar := Diff[Difflen];
 ThisValue := Hex2Dec(ThisChar);
 Inc(ShareIndex[ThisValue]);
 EXCEPT ON E:EXCEPTION DO
-   ToLog('Error crediting frequency: '+E.Message);
+   ToLog(' Error crediting frequency: '+E.Message);
 END;{TRY}
 End;
 
@@ -1533,9 +1546,9 @@ for counter := 1 to 15 do
    writeln(ThisFile,format('%s %s %s',[text1,text2,text3]));
    end;
 CloseFile(ThisFile);
-ToLog('Share index report created');
+ToLog(' Share index report created');
 EXCEPT ON E:EXCEPTION do
-   ToLog('Error saving sharereport.txt: '+E.message);
+   ToLog(' Error saving sharereport.txt: '+E.message);
 END;{TRY}
 End;
 
@@ -1564,12 +1577,12 @@ If fileExists(FileName) then
       end;
    CloseFile(ThisFile);
    EXCEPT ON E:EXCEPTION do
-      ToLog('Error getting block value: '+E.Message);
+      ToLog(' Error getting block value: '+E.Message);
    END;{TRY}
    end
 else
    begin
-   //ToLog('Block do not exists: '+FileName);
+
    end;
 End;
 
@@ -1605,9 +1618,9 @@ var
 Begin
 for counter := 0 to length(ArraySols)-1 do
    TotalValue := TotalValue+ArraySols[counter];
-//ToLog('Registers: '+length(ArraySols).ToString);
+
 TotalRate := (TotalValue/100)/length(ArraySols);
-//ToLog('TotalRate: '+TotalRate.ToString);
+
 TotalRate := Power(16,TotalRate);
 TotalRate := TotalRate/(575);
 MainnetHashRate := Round(TotalRate);

@@ -1,3 +1,9 @@
+Version 0.34
+
+- Rejected shares count.
+- Empty addresses rejected.
+- Send payment result parsed.
+
 Version 0.33
 
 - Valid hash address filters implemented.

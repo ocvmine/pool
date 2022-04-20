@@ -9,6 +9,19 @@ USES
   Classes, SysUtils, CRT, consopooldata, coreunit, NosoDig.Crypto
   { you can add units after this };
 
+Type
+  ConsoLineInfo = packed record
+   texto : string;
+   colour : integer;
+   end;
+
+var
+// GUI RELATED
+  AutoConsole   : boolean = true;
+  ConsoleActive : boolean = true;
+  ConsoleLines  : array of string;
+  LAstShowed    : integer = 0;
+
 // Prints the specified line of the screen
 Procedure PrintLine(number:integer;IfText:String='');
 var
@@ -61,7 +74,7 @@ if number = 4 then
          RunPayments();
          LastPaidBlock:=MainConsensus.block;
          end;
-      PrintLine(10);
+      PrintLine(7);
       end;
    RefreshAge := UTCTime;
    end;
@@ -86,21 +99,21 @@ if number = 5 then
    UpdateServerInfo := false;
    TextBackground(Black);Write('  ');
    Textcolor(white);TextBackground(green);Write(BestHashReadeable(MainBestDiff));
-   PrintLine(10);
+   PrintLine(7);
    end;
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s  %d  %d  %s  [%s]  [%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool]));
-   PrintLine(10);
+   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool]));
+   PrintLine(7);
    RefreshUpTime := UTCTime;
    end;
-if number = 10 then
+if number = 7 then
    begin
    Textcolor(white);TextBackground(Black);
    Write('> '+Command);
    end;
-if number = 11 then
+if number = 8 then
    begin
    Textcolor(black);TextBackground(white);
    Write(Format(' %s ',[IfText]));
@@ -108,29 +121,75 @@ if number = 11 then
    end;
 End;
 
+Function ParseConsoleLine(Texto:String):ConsoLineInfo;
+Begin
+if texto[1] = ',' then result.colour:=green
+else if texto[1] = '.' then result.colour:=red
+else if texto[1] = '/' then result.colour:=yellow
+else result.colour:=white;
+result.texto:=Copy(texto,2,length(Texto));
+End;
+
+Procedure ScrollAutoConsole(Texto:string);
+Begin
+TextBackground(Black);
+TextColor(ParseConsoleLine(Texto).colour);
+window(2,10,79,23);
+GotoXy(78,14);WriteLn();
+Write(ParseConsoleLine(Texto).texto);
+Window(1,1,80,24);
+End;
+
+Procedure InsertOnConsole(Texto:String);
+Begin
+TextBackground(Black);
+TextColor(ParseConsoleLine(Texto).colour);
+window(2,10,79,23);
+GotoXy(1,1);InsLine();
+GotoXy(1,1);
+WriteLn(ParseConsoleLine(Texto).texto);
+Window(1,1,80,24);
+End;
+
+Procedure ScrollDownConsole();
+Begin
+if AutoConsole then exit;
+Inc(LAstShowed);
+ScrollAutoConsole(ConsoleLines[LastShowed]);
+if LAstShowed = Length(ConsoleLines)-1 then AutoConsole := true;
+End;
+
+Procedure ScrollUpConsole();
+Begin
+if AutoConsole then LastShowed := Length(ConsoleLines)-1;
+if LastShowed-14>= 0 then
+   begin
+   AutoConsole := False;
+   InsertOnCOnsole(ConsoleLines[LastShowed-14]);
+   Dec(LastShowed);
+   end
+End;
+
+Procedure RawToConsole(Texto:String);
+Begin
+Insert(Texto,ConsoleLines,Length(ConsoleLines));
+if ( (AutoConsole) and (ConsoleActive) ) then
+   begin
+   ScrollAutoConsole(Texto);
+   end;
+End;
+
 Procedure ShowHelp();
 Begin
-OnMainScreen := false;
-TextBackground(Black);TextColor(White);ClrScr();
-PrintLine(1);WriteLn();
-TextBackground(Black);TextColor(White);
-WriteLn();
-WriteLn('Available commands (case unsensitive): ');
-WriteLn('[Shortcut key]');
-WriteLn();
-Writeln('help    [F1]           -> Shows this info');
-Writeln('nodes   [F2]           -> Shows the seed nodes');
-Writeln('sync    [F3]           -> Syncs with mainnet (Debug)');
-Writeln('run     [F5]           -> Starts the pool');
-Writeln('stop    [F6]           -> Stops the pool');
-Writeln('exit    [ESC]          -> Close the app');
-WriteLn();Write('Press any key to return');
-ThisChar := ReadKey;
-If ThisChar = #0 then ThisChar := Readkey;
-ClrScr();
-OnMainScreen := true;
-LastHelpShown := DefHelpLine;
-SetUpdateScreen();
+RawToConsole(',Help');
+RawToConsole(' Available commands (case unsensitive): ');
+RawToConsole(' [Shortcut key]');
+RawToConsole(' help    [F1]           -> Shows this info');
+RawToConsole(' nodes   [F2]           -> Shows the seed nodes');
+RawToConsole(' sync    [F3]           -> Syncs with mainnet (Debug)');
+RawToConsole(' run     [F5]           -> Starts the pool');
+RawToConsole(' stop    [F6]           -> Stops the pool');
+RawToConsole(' exit    [ESC]          -> Close the app');
 End;
 
 Procedure ShowNodes();
@@ -138,28 +197,15 @@ Var
   Counter : integer;
   ThisNode : TNodeData;
 Begin
-OnMainScreen := false;
-TextBackground(Black);TextColor(White);ClrScr();
-PrintLine(1);WriteLn();
-TextBackground(Black);TextColor(White);
-WriteLn();
-WriteLn('Nodes List: ');
-WriteLn();
+RawToConsole(',Nodes List: '+LengthNodes.ToString);
+RawToConsole(Format('  %-18s %s %6s %s',['Host', 'Port', 'Blow', '  PoW  ']));
 
 For counter := 0 to LengthNodes-1 do
    begin
    ThisNode := GetNodeIndex(Counter);
-   writeln(Format(' %2s %18s %s %6s %d',[Counter.ToString,ThisNode.host,ThisNode.port.ToString,ThisNode.block.ToString,ThisNode.LBPoW,MainConsensus.block]));
+   RawToConsole(Format('  %-18s %s %6s %d',[ThisNode.host, ThisNode.port.ToString, ThisNode.block.ToString, ThisNode.LBPoW]));
    end;
 
-WriteLn();
-Write('Press any key to return');
-ThisChar := ReadKey;
-If ThisChar = #0 then ThisChar := Readkey;
-ClrScr();
-OnMainScreen := true;
-LastHelpShown := DefHelpLine;
-SetUpdateScreen();
 End;
 
 Procedure ShowBlockShares();
@@ -167,28 +213,16 @@ Var
   Counter : integer;
   ThisMiner : TMinersData;
 Begin
-OnMainScreen := false;
-TextBackground(Black);TextColor(White);ClrScr();
-PrintLine(1);WriteLn();
-TextBackground(Black);TextColor(White);
-WriteLn();
-WriteLn('Block shares: ');
-WriteLn();
+RawToConsole(',Block shares: ');
 EnterCriticalSection(CS_Miners);
 For counter := 0 to Length(ArrMiners)-1 do
    begin
    ThisMiner := ArrMiners[Counter];
-   writeln(Format(' %0:-40s %12s %5s %d',[ThisMiner.address,Int2Curr(ThisMiner.Balance),ThisMiner.Shares.ToString,MainConsensus.block-ThisMiner.LastPay]));
+   RawToConsole(Format(' %0:-40s %12s %5s %d',[ThisMiner.address,Int2Curr(ThisMiner.Balance),
+                         ThisMiner.Shares.ToString,ThisMiner.LastPay+30-MainConsensus.block]));
    end;
 LeaveCriticalSection(CS_Miners);
-WriteLn();
-Write('Press any key to return');
-ThisChar := ReadKey;
-If ThisChar = #0 then ThisChar := Readkey;
-ClrScr();
-OnMainScreen := true;
-LastHelpShown := DefHelpLine;
-SetUpdateScreen();
+
 End;
 
 Procedure PrintUpdateScreen();
@@ -198,8 +232,29 @@ PrintLine(2);
 PrintLine(3);
 PrintLine(4);
 PrintLine(5);
-PrintLine(11,LastHelpShown);
-PrintLine(10);
+PrintLine(8,LastHelpShown);
+PrintLine(7);
+End;
+
+Procedure DrawPanelBorders();
+var
+  counter : integer;
+Begin
+Textcolor(white);
+TextBackground(black);
+for counter := 10 to 23 do
+   begin
+   gotoxy(1,counter);write('|');
+   gotoxy(80,counter);write('|');
+   end;
+for counter := 1 to 80 do
+   begin
+   gotoxy(counter,9);write('-');
+   gotoxy(counter,24);write('-');
+   end;
+TextBackground(cyan);
+Textcolor(black);
+Gotoxy(1,25);write(' [F8] Change Mode ');
 End;
 
 Procedure CheckLogs();
@@ -208,35 +263,16 @@ var
 Begin
 if length(LogLines)>0 then
    begin
-   window(1,13,80,24);
-   GotoXy(80,11);WriteLn();
    Repeat
       begin
       EnterCriticalSection(CS_LogLines);
       Texto := LogLines[0];
       Delete(LogLines,0,1);
       LeaveCriticalSection(CS_LogLines);
-      if Texto[1] = ',' then
-         begin
-         TextColor(Green);
-         Texto := Copy(Texto,2,length(Texto));
-         end
-      else if Texto[1] = '.' then
-         begin
-         TextColor(red);
-         Texto := Copy(Texto,2,length(Texto));
-         end
-      else if Texto[1] = '/' then
-         begin
-         TextColor(yellow);
-         Texto := Copy(Texto,2,length(Texto));
-         end
-      else TextColor(White);
-      WriteLn(Texto);
-      RawToLog(Texto);
+      RawToConsole(Texto);
+      RawToLog(Copy(Texto,2,length(Texto)));
       end;
    until length(LogLines) = 0;
-   Window(1,1,80,25);
    end;
 End;
 
@@ -280,6 +316,7 @@ SetLength(LogLines,0);
 SetLength(NewLogLines,0);
 SetLength(ArrMiners,0);
 SetLength(ArrShares,0);
+SetLength(ConsoleLines,0);
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
 if not directoryexists('miners') then createdir('miners');
@@ -322,8 +359,9 @@ MainConsensus := Default(TNodeData);
 LastHelpShown := DefHelpLine;
 UpdatePoolBalance;
 FillSolsArray();
-ToLog('********** New Session **********');
-if PoolAuto then PrintLine(11,StartPool);
+ToLog(' ********** New Session **********');
+if PoolAuto then PrintLine(8,StartPool);
+DrawPanelBorders;
 REPEAT
    REPEAT
       If ((GetSolution.Diff<MainBestDiff) and (GetSolution.Hash<>'')) then SendSolution(GetSolution);
@@ -364,7 +402,7 @@ REPEAT
             begin
             CheckPaysThreads := false;
             SaveMiners();
-            ToLog(Format('Completed payments (%d Good - %d Fail)',[GoodPayments,BadPayments]));
+            ToLog(Format(' Completed payments (%d Good - %d Fail)',[GoodPayments,BadPayments]));
             GenerateReport();
             UpdatePoolBalance;
             end;
@@ -391,52 +429,48 @@ REPEAT
          Command := 'sync';
          ThisChar := #13;
          end;
+      if ThisChar=#72 then //up arrow
+         begin
+         If ConsoleActive then ScrollUpConsole;
+         ThisChar := #0;
+         end;
+      if ThisChar=#80 then //up arrow
+         begin
+         If ConsoleActive then ScrollDownConsole;
+         ThisChar := #0;
+         end;
       end;
    if ((Ord(ThisChar)>=32) and (Ord(ThisChar)<=126)) then
       begin
       Command := Command+ThisChar;
-      PrintLine(10);
+      PrintLine(7);
       end
    else if Ord(ThisChar) = 8 then
       begin
       SetLength(Command,Length(Command)-1);
-      PrintLine(10);
+      PrintLine(7);
       end
    else if Ord(ThisChar) = 13 then
       begin
       if Uppercase(Parameter(Command,0)) = 'EXIT' then FinishProgram := true
       else if Uppercase(Parameter(Command,0)) = 'HELP' then ShowHelp
       else if Uppercase(Parameter(Command,0)) = 'NODES' then ShowNodes
-      else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(11,StartPool)
-      else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(11,StopPool)
+      else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(8,StartPool)
+      else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(8,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
-      else if Uppercase(Parameter(Command,0)) = 'LB' then ToLog(GetMyLastUpdatedBlock.ToString)
+
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray
-      else if Uppercase(Parameter(Command,0)) = 'POOLINFO' then
-         ToLog(minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString)
-
       else if Uppercase(Parameter(Command,0)) = 'SAVE' then
          begin
          SaveMiners;
-         ToLog('Miners File saved');
+         ToLog(' Miners File saved');
          end
-
-      else if Uppercase(Parameter(Command,0)) = 'TESTPAY' then
-         begin
-         EnterCriticalSection(CS_Miners);
-         ArrMiners[0].Balance:=ArrMiners[0].Balance+1000;
-         LeaveCriticalSection(CS_Miners);
-         end
-      else if Uppercase(Parameter(Command,0)) = 'DEBT' then ToLog('Total debt: '+Int2Curr(GetTotalDebt))
+      else if Uppercase(Parameter(Command,0)) = 'DEBT' then ToLog(' Total debt: '+Int2Curr(GetTotalDebt))
       else if Uppercase(Parameter(Command,0)) = 'REPORT' then GenerateReport
       else if Uppercase(Parameter(Command,0)) = 'BALANCE' then
          begin
-         ToLog(Format('Pool Address: %s',[Int2Curr(GetAddressBalance(PoolAddress))]));
-         end
-      else if Uppercase(Parameter(Command,0)) = 'PREFIX' then   // Debug only
-         Begin
-         ToLog(GetPrefixStr(StrToIntDef(Parameter(Command,1),0)));
+         ToLog(Format(',Pool Address: %s',[Int2Curr(GetAddressBalance(PoolAddress))]));
          end
       else if Uppercase(Parameter(Command,0)) = 'SYNC' then
          begin
@@ -447,11 +481,15 @@ REPEAT
          LastConsensusTry := UTCTime;
          PrintLine(4);
          end
-      else if Command <> '' then PrintLine(11,' Error.'+DefHelpLine);
+      else if Command <> '' then
+         begin
+         PrintLine(8,' Error.'+DefHelpLine);
+         rawToCOnsole(' '+Command);
+         end;
       Command :='';
-      PrintLine(10);
+      PrintLine(7);
       end
-   else if Ord(ThisChar) = 27 then FinishProgram := true;
+   else if Ord(ThisChar) = 27 then FinishProgram := false;
    sleep(1);
 UNTIL FinishProgram;
 SaveMiners();

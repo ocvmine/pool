@@ -107,7 +107,8 @@ var
   NodesArray    : Array of TNodeData;
   DefaultNodes  : String = '23.94.21.83:8080 '+'45.146.252.103:8080 '+'109.230.238.240:8080 '+
                            '194.156.88.117:8080 '+'107.175.59.177:8080 '+'107.172.193.176:8080 '+
-                           '107.175.194.151:8080 '+'192.3.73.184:8080';
+                           '107.175.194.151:8080 '+'192.3.73.184:8080 '+'107.175.24.151:8080 '+
+                           '107.174.137.27:8080';
 
 IMPLEMENTATION
 
@@ -331,43 +332,61 @@ If ContactedNodes>=(LengthNodes div 2) then
    // Get the consensusblock
    For counter := 0 to LengthNodes-1 do
       begin
-      AddValue(GetNodeIndex(counter).block.ToString);
-      ResNode.block := GetHighest.ToInteger;
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).block.ToString);
+         ResNode.block := GetHighest.ToInteger;
+         end;
       end;
    // Get the consensus LBHash
    SetLength(ArrT,0);
    For counter := 0 to LengthNodes-1 do
       Begin
-      AddValue(GetNodeIndex(counter).LBHash);
-      ResNode.LBHash := GetHighest;
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).LBHash);
+         ResNode.LBHash := GetHighest;
+         end;
       End;
    // Get the consensus last block time end
    SetLength(ArrT,0);
    For counter := 0 to LengthNodes-1 do
       Begin
-      AddValue(GetNodeIndex(counter).LBTimeEnd.ToString);
-      ResNode.LBTimeEnd := GetHighest.ToInt64;
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).LBTimeEnd.ToString);
+         ResNode.LBTimeEnd := GetHighest.ToInt64;
+         end;
       End;
    // Get the consensus last block Miner
    SetLength(ArrT,0);
    For counter := 0 to LengthNodes-1 do
       Begin
-      AddValue(GetNodeIndex(counter).LBMiner);
-      ResNode.LBMiner := GetHighest;
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).LBMiner);
+         ResNode.LBMiner := GetHighest;
+         end;
       End;
    // Get the consensus last block PoW
    SetLength(ArrT,0);
    For counter := 0 to LengthNodes-1 do
       Begin
-      AddValue(GetNodeIndex(counter).LBPoW.ToString);
-      ResNode.LBPoW := GetHighest.ToInt64;
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).LBPoW.ToString);
+         ResNode.LBPoW := GetHighest.ToInt64;
+         end;
       End;
    // Get the consensus last block SolDiff
    SetLength(ArrT,0);
    For counter := 0 to LengthNodes-1 do
       Begin
-      AddValue(GetNodeIndex(counter).LBSolDiff);
-      ResNode.LBSolDiff := GetHighest;
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).LBSolDiff);
+         ResNode.LBSolDiff := GetHighest;
+         end;
       End;
    {More fields to get update}
 
