@@ -121,6 +121,20 @@ if number = 8 then
    end;
 End;
 
+Procedure ClearPanel();
+Begin
+if consoleActive then
+   begin
+   Textcolor(white);
+   TextBackground(black);
+   window(2,10,79,23);
+   ClrScr;
+   window(1,1,80,25);
+   SetLength(ConsoleLines,0);
+   Autoconsole := true;
+   end;
+End;
+
 Function ParseConsoleLine(Texto:String):ConsoLineInfo;
 Begin
 if texto[1] = ',' then result.colour:=green
@@ -137,7 +151,7 @@ TextColor(ParseConsoleLine(Texto).colour);
 window(2,10,79,23);
 GotoXy(78,14);WriteLn();
 Write(ParseConsoleLine(Texto).texto);
-Window(1,1,80,24);
+Window(1,1,80,25);
 End;
 
 Procedure InsertOnConsole(Texto:String);
@@ -148,7 +162,7 @@ window(2,10,79,23);
 GotoXy(1,1);InsLine();
 GotoXy(1,1);
 WriteLn(ParseConsoleLine(Texto).texto);
-Window(1,1,80,24);
+Window(1,1,80,25);
 End;
 
 Procedure ScrollDownConsole();
@@ -167,7 +181,7 @@ if LastShowed-14>= 0 then
    AutoConsole := False;
    InsertOnCOnsole(ConsoleLines[LastShowed-14]);
    Dec(LastShowed);
-   end
+   end;
 End;
 
 Procedure RawToConsole(Texto:String);
@@ -179,17 +193,58 @@ if ( (AutoConsole) and (ConsoleActive) ) then
    end;
 End;
 
-Procedure ShowHelp();
+Procedure PageUpConsole();
+var
+  counter : integer;
 Begin
+for counter := 1 to 14 do
+   ScrollUpConsole;
+End;
+
+Procedure PageDownConsole();
+var
+  counter : integer;
+Begin
+for counter := 1 to 14 do
+   ScrollDownConsole;
+End;
+
+Procedure GoToEndConsole();
+Begin
+repeat
+  ScrollDownConsole
+until autoconsole;
+End;
+
+Procedure ShowHelp(commandtoshow:string);
+Begin
+if length(commandtoshow)>20 then setlength(commandtoshow,20);
 RawToConsole(',Help');
-RawToConsole(' Available commands (case unsensitive): ');
-RawToConsole(' [Shortcut key]');
-RawToConsole(' help    [F1]           -> Shows this info');
-RawToConsole(' nodes   [F2]           -> Shows the seed nodes');
-RawToConsole(' sync    [F3]           -> Syncs with mainnet (Debug)');
-RawToConsole(' run     [F5]           -> Starts the pool');
-RawToConsole(' stop    [F6]           -> Stops the pool');
-RawToConsole(' exit    [ESC]          -> Close the app');
+if commandtoshow = '' then
+   begin
+   RawToConsole('/Available commands (case unsensitive): ');
+   RawToConsole('/{Mandatory} [Optional] <Key shortcut>');
+   RawToConsole('/Use Help {command} for more details');
+   RawToConsole(' help <F1>               -> Shows this info');
+   RawToConsole(' nodes <F2>              -> Shows the seed nodes');
+   RawToConsole(' run                     -> Starts the pool');
+   RawToConsole(' report {type} [options] -> Generates a report');
+   RawToConsole(' cls                     -> Clears the console');
+   RawToConsole(' exit <ALT+X>            -> Close the app');
+   RawToConsole(' restart <ALT+R>         -> Restarts the app');
+   end
+else if commandtoshow = 'REPORT' then
+   begin
+   RawToConsole(',Report command');
+   RawToConsole('/Available options');
+   RawToConsole(' -n:number -> Shows up to number entries');
+   RawToConsole('/Available report');
+   RawToConsole(' miners  -> Miner app used for SOURCE request');
+   RawToConsole(' ips     -> User IPv4 on SOURCE request');
+   RawToConsole(' shareip -> User IPv4 off valid shares');
+   RawToConsole(' wrongsm -> Miner app of wrong shares');
+   end
+else RawToConsole('.Unknown command: '+commandtoshow);
 End;
 
 Procedure ShowNodes();
@@ -254,7 +309,7 @@ for counter := 1 to 80 do
    end;
 TextBackground(cyan);
 Textcolor(black);
-Gotoxy(1,25);write(' [F8] Change Mode ');
+Gotoxy(1,25);write(' [F8] Change Mode {Comming soon...} ');
 End;
 
 Procedure CheckLogs();
@@ -270,7 +325,6 @@ if length(LogLines)>0 then
       Delete(LogLines,0,1);
       LeaveCriticalSection(CS_LogLines);
       RawToConsole(Texto);
-      RawToLog(Copy(Texto,2,length(Texto)));
       end;
    until length(LogLines) = 0;
    end;
@@ -278,12 +332,17 @@ End;
 
 Procedure CloseTheApp(mensaje:string);
 Begin
+TextColor(white);
+gotoxy(80,25);WriteLn();
 if mensaje<>'' then
    begin
    writeln(mensaje);
    writeln('Press enter to close');
    Readln;
    end;
+writeLn('ConsoPool Properly CLosed');
+saveminers;
+Poolserver.Active:=false;
 PoolServer.Free;
 DoneCriticalSection(CS_UpdateScreen);
 DoneCriticalSection(CS_PrefixIndex);
@@ -296,7 +355,10 @@ DoneCriticalSection(CS_PaysFile);
 DoneCriticalSection(CS_PayThreads);
 DoneCriticalSection(CS_PoolBalance);
 DoneCriticalSection(CS_LastBlockRate);
-Halt(2);
+DoneCriticalSection(CS_USerMiner);
+DoneCriticalSection(CS_UserIPArr);
+DoneCriticalSection(CS_ShareIPArr);
+DoneCriticalSection(CS_WrongShareMiner);
 End;
 
 BEGIN
@@ -311,12 +373,21 @@ InitCriticalSection(CS_PaysFile);
 InitCriticalSection(CS_PayThreads);
 InitCriticalSection(CS_PoolBalance);
 InitCriticalSection(CS_LastBlockRate);
+InitCriticalSection(CS_USerMiner);
+InitCriticalSection(CS_UserIPArr);
+InitCriticalSection(CS_ShareIPArr);
+InitCriticalSection(CS_WrongShareMiner);
+
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
 SetLength(ArrMiners,0);
 SetLength(ArrShares,0);
 SetLength(ConsoleLines,0);
+SetLength(UserMiner,0);
+SetLength(UserIpArr,0);
+SetLength(WrongShareMiner,0);
+
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
 if not directoryexists('miners') then createdir('miners');
@@ -403,7 +474,7 @@ REPEAT
             CheckPaysThreads := false;
             SaveMiners();
             ToLog(Format(' Completed payments (%d Good - %d Fail)',[GoodPayments,BadPayments]));
-            GenerateReport();
+            GenerateReport(uToFile);
             UpdatePoolBalance;
             end;
          end;
@@ -418,27 +489,64 @@ REPEAT
          begin
          Command := 'help';
          ThisChar := #13;
-         end;
-      if ThisChar=#60 then // F2
+         end
+      else if ThisChar=#60 then // F2
          begin
          Command := 'nodes';
          ThisChar := #13;
-         end;
-      if ThisChar=#61 then // F3
+         end
+      else if ThisChar=#61 then // F3
          begin
-         Command := 'sync';
+         if LastCommand <> '' then Command := LastCommand;
+         PrintLine(7);
+         ThisChar := #0;
+         end
+      else if ThisChar=#45 then // alt+x
+         begin
+         Command := 'exit';
          ThisChar := #13;
-         end;
-      if ThisChar=#72 then //up arrow
+         end
+      else if ThisChar=#19 then // alt+r
+         begin
+         Command := 'restart';
+         ThisChar := #13;
+         end
+      else if ThisChar=#72 then //up arrow
          begin
          If ConsoleActive then ScrollUpConsole;
          ThisChar := #0;
-         end;
-      if ThisChar=#80 then //up arrow
+         end
+      else if ThisChar=#80 then //up arrow
          begin
          If ConsoleActive then ScrollDownConsole;
          ThisChar := #0;
+         end
+      else if ThisChar=#73 then //page up
+         begin
+         If ConsoleActive then PageUpConsole;
+         ThisChar := #0;
+         end
+      else if ThisChar=#81 then //page down
+         begin
+         If ConsoleActive then PageDownConsole;
+         ThisChar := #0;
+         end
+      else if ThisChar=#79 then //END key
+         begin
+         If ConsoleActive then GoToEndConsole;
+         ThisChar := #0;
+         end
+      else
+         begin
+         // For debugging purposes only
+         //command := command+Ord(ThisChar).ToString;
+         ThisChar := #0;
          end;
+      end;
+   if ( (length(command)>= 77) and (Ord(ThisChar) <> 8) ) then
+      begin
+      beep;
+      ThisChar := #0;
       end;
    if ((Ord(ThisChar)>=32) and (Ord(ThisChar)<=126)) then
       begin
@@ -453,21 +561,28 @@ REPEAT
    else if Ord(ThisChar) = 13 then
       begin
       if Uppercase(Parameter(Command,0)) = 'EXIT' then FinishProgram := true
-      else if Uppercase(Parameter(Command,0)) = 'HELP' then ShowHelp
+      else if Uppercase(Parameter(Command,0)) = 'HELP' then ShowHelp(Uppercase(Parameter(Command,1)))
       else if Uppercase(Parameter(Command,0)) = 'NODES' then ShowNodes
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(8,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(8,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
-
+      else if Uppercase(Parameter(Command,0)) = 'RESTART' then
+         begin
+         FileToRestart := Parameter(Command,1);
+         RestartAfterQuit := true;
+         FinishProgram := true;
+         end
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray
       else if Uppercase(Parameter(Command,0)) = 'SAVE' then
          begin
          SaveMiners;
-         ToLog(' Miners File saved');
+         ToLog(',Miners File saved',uToConsole);
          end
       else if Uppercase(Parameter(Command,0)) = 'DEBT' then ToLog(' Total debt: '+Int2Curr(GetTotalDebt))
-      else if Uppercase(Parameter(Command,0)) = 'REPORT' then GenerateReport
+      else if Uppercase(Parameter(Command,0)) = 'MAINREPORT' then GenerateReport(uToConsole)
+      else if Uppercase(Parameter(Command,0)) = 'REPORT' then CounterReport(command,uToConsole)
+      else if Uppercase(Parameter(Command,0)) = 'CLS' then ClearPanel
       else if Uppercase(Parameter(Command,0)) = 'BALANCE' then
          begin
          ToLog(Format(',Pool Address: %s',[Int2Curr(GetAddressBalance(PoolAddress))]));
@@ -484,15 +599,28 @@ REPEAT
       else if Command <> '' then
          begin
          PrintLine(8,' Error.'+DefHelpLine);
-         rawToCOnsole(' '+Command);
+         rawToCOnsole('.Unknown command: '+Command);
          end;
+      if command <> '' then LastCommand := Command;
       Command :='';
       PrintLine(7);
       end
    else if Ord(ThisChar) = 27 then FinishProgram := false;
    sleep(1);
 UNTIL FinishProgram;
-SaveMiners();
 CloseTheApp('');
+if RestartAfterQuit then
+   begin
+   if FileToRestart='' then
+      begin
+      {$IFDEF UNIX}
+      FileToRestart:='consopool';
+      {$ENDIF}
+      {$IFDEF WINDOWS}
+      FileToRestart:='consopool.exe';
+      {$ENDIF}
+      end;
+   RunExternalProgram(FileToRestart);
+   end;
 END.
 

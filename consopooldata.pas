@@ -48,6 +48,7 @@ Type
    TCounter = Packed record
     data         : string[60];
     counter      : integer;
+    inblock      : integer;
     end;
 
 
@@ -70,14 +71,14 @@ Function GetTotalDebt():Int64;
 Procedure AddShare(Share:string);
 Function SharesCount():Integer;
 Function ShareAlreadyExists(Share:string):boolean;
-Procedure CreditShare(Address:String);
+Procedure CreditShare(Address,IPUser:String);
 Function ShareIsValid(Share,Address,MinerProgram,IPUser:String):integer;
 
 Procedure SetSolution(Data:TSolution);
 Function GetSolution():TSolution;
 
 Function ResetLogs():boolean;
-Procedure RawToLog(Linea:String);
+Procedure RawToLogFile(Linea:String);
 function SaveConfig():boolean;
 Procedure LoadConfig();
 Function UpdateScreen():Boolean;
@@ -91,12 +92,13 @@ Function UpTime():string;
 Function StopPool():String;
 Function GetDiffHashrate(bestdiff:String):integer;
 Function GetSessionSpeed(): int64;
-Procedure ToLog(Texto:string;ShowOnScreen:boolean = true);
+Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
 Function GetBlockBest():String;
 Procedure SetBlockBest(ThisValue:String);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
-Procedure GenerateReport();
+Procedure GenerateReport(destination:integer);
+Procedure CounterReport(linea:String;Destination:integer);
 Procedure BuildNewBlock();
 Procedure ResetBlock();
 Function GetPrefixIndex():Integer;
@@ -126,18 +128,35 @@ Procedure FillSolsArray();
 Procedure CalculateMainNetHashrate();
 Procedure GetBlocksMinedByPool();
 // Debug Counters
-
+Procedure AddUserMiner(Minerv:String);
+Procedure ClearUserMinerArray(ClearAll:boolean = true);
+Procedure AddUserIP(userip:string);
+Procedure ClearUserIPArray(ClearAll:boolean = true);
+Procedure AddShareIP(userip:string);
+Procedure ClearShareIPArray(ClearAll:boolean = true);
+Procedure AddWrongShareMiner(userip:string);
+Procedure ClearWrongShareMiner(ClearAll:boolean = true);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.35';
+  AppVersion = 'v0.40';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+
+  // Predefined Types fpr OutPut
+  uToBoth      = 0;
+  uToFile  = 1;
+  uToConsole = 2;
 
 
 VAR
   // Like a CONST
   StoreShares : boolean = False;
+  // Counters
+  UserMiner       : array of TCounter;
+  UserIPArr       : array of TCounter;
+  ShareIPArr      : array of TCounter;
+  WrongShareMiner : array of TCounter;
   // Files
   configfile, LogFile, OldLogFile, PaysFile : TextFile;
   MinersFile : File of TMinersData;
@@ -158,6 +177,7 @@ VAR
   ArrayMiner   : array of string;
   ShareIndex   : array[0..15] of integer;
   Command      : string  = '';
+  LastCommand  : string  = '';
   ThisChar     : Char;
   LastHelpShown: String = '';
   FinishProgram: Boolean = false;
@@ -173,6 +193,8 @@ VAR
   NewLogLines  : Array of string;
   MainnetTimeStamp : int64 = 0;
   RejectedShares   : integer = 0;
+  RestartAfterQuit : boolean = false;
+  FileToRestart    : string = '';
   // Mainnet
   LastConsensusTry : int64   = 0;
   WaitingConsensus :Boolean = false;
@@ -204,17 +226,21 @@ VAR
   SESSION_Shares     : integer = 0;
   SESSION_HashPerShare : QWord = 0;
   // Critical sections
-  CS_UpdateScreen : TRTLCriticalSection;
-  CS_PrefixIndex  : TRTLCriticalSection;
-  CS_LogLines     : TRTLCriticalSection;
-  CS_Miners       : TRTLCriticalSection;
-  CS_Shares       : TRTLCriticalSection;
-  CS_BlockBest    : TRTLCriticalSection;
-  CS_Solution     : TRTLCriticalSection;
-  CS_PaysFile     : TRTLCriticalSection;
-  CS_PayThreads   : TRTLCriticalSection;
-  CS_PoolBalance  : TRTLCriticalSection;
-  CS_LastBlockRate: TRTLCriticalSection;
+  CS_UpdateScreen    : TRTLCriticalSection;
+  CS_PrefixIndex     : TRTLCriticalSection;
+  CS_LogLines        : TRTLCriticalSection;
+  CS_Miners          : TRTLCriticalSection;
+  CS_Shares          : TRTLCriticalSection;
+  CS_BlockBest       : TRTLCriticalSection;
+  CS_Solution        : TRTLCriticalSection;
+  CS_PaysFile        : TRTLCriticalSection;
+  CS_PayThreads      : TRTLCriticalSection;
+  CS_PoolBalance     : TRTLCriticalSection;
+  CS_LastBlockRate   : TRTLCriticalSection;
+  CS_USerMiner       : TRTLCriticalSection;
+  CS_UserIPArr       : TRTLCriticalSection;
+  CS_ShareIPArr      : TRTLCriticalSection;
+  CS_WrongShareMiner : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -278,7 +304,7 @@ if not IsValidHashAddress(Address) then
    end;
 TrxTime := UTCTime;
 trfHash := GetTransferHash(TrxTime.ToString+PoolAddress+address+ToSend.ToString+IntToStr(GetMainConsensus.block));
-OrdHash := GetOrderHash(TrxTime.ToString+'1'+trfHash);
+OrdHash := GetOrderHash('1'+TrxTime.ToString+trfHash);
 
 SignString := GetStringSigned(TrxTime.ToString+PoolAddress+Address+ToSend.ToString+
                      Fee.ToString+'1',PrivateKey);
@@ -298,7 +324,7 @@ if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') ) then
 else
    begin
    ErrorCode := StrToIntDef(Parameter(Resultado,0),-1);
-   ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString,false);
+   ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString,uToFile);
    end;
 DecreasePayThreads(WasGood);
 End;
@@ -604,7 +630,7 @@ For counter := 0 to length(ArrShares)-1 do
 LeaveCriticalSection(CS_Shares);
 End;
 
-Procedure CreditShare(Address:String);
+Procedure CreditShare(Address,IPUser:String);
 var
   counter : integer;
   Credited : boolean = false;
@@ -630,6 +656,7 @@ if Not Credited then
    Insert(NewMiner,ArrMiners,Length(ArrMiners));
    end;
 LeaveCriticalSection(CS_Miners);
+AddShareIP(IPUser);
 End;
 
 Procedure AddShare(Share:string);
@@ -669,15 +696,17 @@ Begin
 Result := 0;
 if ShareAlreadyExists(Share) then
    begin
-   ToLog(Format(' Error 4 [%s] [%s]',[MinerProgram,IPUser]));
+   ToLog(Format(' Error 4 [%s] [%s]',[MinerProgram,IPUser]),uToFile);
    result := 4;
    Inc(RejectedShares);
+   AddWrongShareMiner(MinerProgram);
    end
 else if ((length(Share)<18) or (length(Share)>33)) then
    begin
-   ToLog(Format(' Error 7 [%s] [%s]',[MinerProgram,IPUser]));
+   ToLog(Format(' Error 7 [%s] [%s]',[MinerProgram,IPUser]),uToFile);
    result := 7;
    Inc(RejectedShares);
+   AddWrongShareMiner(MinerProgram);
    end
 else
    begin
@@ -687,7 +716,7 @@ else
       begin
       Result := 0;
       AddShare(Share+Address);
-      CreditShare(Address);
+      CreditShare(Address,IPUser);
       If StoreShares then CreditFrequency(ThisDiff);
       Inc(SESSION_Shares);
       UpdateServerInfo := true;
@@ -710,8 +739,9 @@ else
    else
       begin
       result := 5;
-      ToLog(Format(' Error 5 [%s] [%s]',[MinerProgram,IPUser]),false);
+      ToLog(Format(' Error 5 [%s] [%s]',[MinerProgram,IPUser]),uToFile);
       Inc(RejectedShares);
+      AddWrongShareMiner(MinerProgram);
       end;
    end;
 End;
@@ -752,7 +782,7 @@ EXCEPT ON E:Exception do
 END {Try};
 End;
 
-Procedure RawToLog(Linea:String);
+Procedure RawToLogFile(Linea:String);
 Begin
 TRY
 append(logfile);
@@ -956,12 +986,23 @@ Seconds := UTCTime-SESSION_Started;
 Result := (SESSION_HashPerShare*SESSION_Shares) div (seconds+1);
 End;
 
-Procedure ToLog(Texto:string;ShowOnScreen:boolean = true);
+Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
 Begin
-Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
-if not ShowOnScreen then RawToLog(copy(Texto,2, length(texto)))
+if ShowOnScreen = uToFile then
+   begin
+   Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
+   RawToLogFile(copy(Texto,2, length(texto)))
+   end
+else if ShowOnScreen = uToConsole then
+   begin
+   EnterCriticalSection(CS_LogLines);
+   Insert(Texto,LogLines,Length(LogLines));
+   LeaveCriticalSection(CS_LogLines);
+   end
 else
    begin
+   Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
+   RawToLogFile(copy(Texto,2, length(texto)));
    EnterCriticalSection(CS_LogLines);
    Insert(Texto,LogLines,Length(LogLines));
    LeaveCriticalSection(CS_LogLines);
@@ -1050,12 +1091,12 @@ if PayingAddresses>0 then
 else
    begin
    SaveMiners();
-   GenerateReport();
+   GenerateReport(uToFile);
    UpdatePoolBalance;
    end;
 End;
 
-Procedure GenerateReport();
+Procedure GenerateReport(destination:integer);
 var
   CopyArray, finalArray : Array of TMinersData ;
   counter, counter2   : integer;
@@ -1063,7 +1104,7 @@ var
   ReportFile : TextFile;
   BalanceTotal : int64 = 0;
   SharesTotal  : int64 = 0;
-  AddText,BalanText, sharestext : string;
+  AddText,BalanText, sharestext, ToPayText : string;
 Begin
 SetLength(CopyArray,0);
 SetLength(finalArray,0);
@@ -1089,22 +1130,149 @@ for counter := 0 to length(CopyArray)-1 do
       if not inserted then Insert(CopyArray[counter],FinalArray,Length(FinalArray));
       end;
    end;
-AssignFile(ReportFile,'report.txt');
-Rewrite(ReportFile);
-writeln(ReportFile,'Block : '+GetMAinConsensus.block.ToString());
-writeln(ReportFile,'Miners: '+Length(FinalArray).ToString());
-WriteLn(ReportFile,'Debt  : '+Int2Curr(BalanceTotal));
-WriteLn(ReportFile,'Shares: '+SharesTotal.ToString);
-Writeln(ReportFile,'');
-for counter2 := 0 to length(finalArray)-1 do
+if Destination = uToFile then
    begin
-   AddText   := format('%0:-35s',[FinalArray[counter2].address]);
-   BalanText := Format('%0:12s',[Int2Curr(FinalArray[counter2].balance)]);
-   sharestext:= Format('%0:5s',[FinalArray[counter2].Shares.ToString]);
-   writeln(ReportFile,format('%s %s %s',[AddText,BalanText,sharestext]));
+   AssignFile(ReportFile,'report.txt');
+   Rewrite(ReportFile);
+   writeln(ReportFile,'Block : '+GetMAinConsensus.block.ToString());
+   writeln(ReportFile,'Miners: '+Length(FinalArray).ToString());
+   WriteLn(ReportFile,'Debt  : '+Int2Curr(BalanceTotal));
+   WriteLn(ReportFile,'Shares: '+SharesTotal.ToString);
+   Writeln(ReportFile,'');
+   for counter2 := 0 to length(finalArray)-1 do
+      begin
+      AddText   := format('%0:-35s',[FinalArray[counter2].address]);
+      BalanText := Format('%0:12s',[Int2Curr(FinalArray[counter2].balance)]);
+      sharestext:= Format('%0:5s',[FinalArray[counter2].Shares.ToString]);
+      writeln(ReportFile,format('%s %s %s',[AddText,BalanText,sharestext]));
+      end;
+   CloseFile(ReportFile);
+   ToLog(format('/Report file Generated [ %s ]',[Int2Curr(GetAddressBalance(PoolAddress)-BalanceTotal)]));
+   end
+else if Destination = uToConsole then
+   Begin
+   ToLog(',Report',uToConsole);
+   ToLog(' Block : '+GetMAinConsensus.block.ToString(),uToConsole);
+   ToLog(' Miners: '+Length(FinalArray).ToString(),uToConsole);
+   ToLog(' Debt  : '+Int2Curr(BalanceTotal),uToConsole);
+   ToLog(' Shares: '+SharesTotal.ToString,uToConsole);
+   AddText   := format('%0:-35s',['Address']);
+   BalanText := Format('%0:12s',['Balance  ']);
+   sharestext:= Format('%0:6s',['Shares']);
+   ToPayText := Format('%0:6s',['To pay']);
+   ToLog('/----------------------------------------------------------------------',uToConsole);
+   ToLog(format('/%s | %s | %s | %s |',[AddText,BalanText,sharestext, ToPayText]),uToConsole);
+   ToLog('/----------------------------------------------------------------------',uToConsole);
+   for counter2 := 0 to length(finalArray)-1 do
+      begin
+      AddText   := format('%0:-35s',[FinalArray[counter2].address]);
+      BalanText := Format('%0:12s',[Int2Curr(FinalArray[counter2].balance)]);
+      sharestext:= Format('%0:6s',[FinalArray[counter2].Shares.ToString]);
+      ToPayText := Format('%0:6d',[FinalArray[counter2].LastPay+30-GetMainConsensus.block]);
+      ToLog(format(' %s | %s | %s | %s |',[AddText,BalanText,sharestext, ToPayText]),uToConsole);
+      end;
+   ToLog('/----------------------------------------------------------------------',uToConsole);
    end;
-CloseFile(ReportFile);
-ToLog(format('/Report file Generated [ %s ]',[Int2Curr(GetAddressBalance(PoolAddress)-BalanceTotal)]));
+End;
+
+Procedure CounterReport(Linea:String;Destination:integer);
+var
+  counter, count2 : integer;
+  copyArray,FinalArray : array of TCOunter;
+  MinerApp, thisCounter, ThisinBlock  : String;
+  ReportTitle, dataname : string;
+  TotalRecords : integer = 0;
+  Added : boolean;
+  ReportType : string = '';
+  NumberRecords : integer = 0;
+  SubString  : string;
+Begin
+ReportType := Parameter(Linea,1);
+if Pos(' -n:',linea) > 0 then
+   begin
+   substring := copy(linea,Pos(' -n:',linea)+4,length(linea));
+   NumberRecords := StrToIntDef(Parameter(substring,0),0);
+   end;
+if Uppercase(ReportType) = 'MINERS' then
+   begin
+   ReportTitle := 'Miners Report';
+   Dataname    := 'MinerApp';
+   SetLength(CopyArray,0);
+   EnterCriticalSection(CS_USerMiner);
+   CopyArray := Copy(UserMiner,0,length(UserMiner));
+   LeaveCriticalSection(CS_USerMiner);
+   end
+else if Uppercase(ReportType) = 'IPS' then
+   begin
+   ReportTitle := 'Users IP Report';
+   Dataname    := 'IP';
+   SetLength(CopyArray,0);
+   EnterCriticalSection(CS_UserIPArr);
+   CopyArray := Copy(UserIPArr,0,length(UserIPArr));
+   LeaveCriticalSection(CS_UserIPArr);
+   end
+else if Uppercase(ReportType) = 'SHAREIP' then
+   begin
+   ReportTitle := 'Shares IP Report';
+   Dataname    := 'IP';
+   SetLength(CopyArray,0);
+   EnterCriticalSection(CS_ShareIPArr);
+   CopyArray := Copy(ShareIPArr,0,length(ShareIPArr));
+   LeaveCriticalSection(CS_ShareIPArr);
+   end
+else if Uppercase(ReportType) = 'WRONGM' then
+   begin
+   ReportTitle := 'Wrong Shares Miner Report';
+   Dataname    := 'MinerApp';
+   SetLength(CopyArray,0);
+   EnterCriticalSection(CS_WrongShareMiner);
+   CopyArray := Copy(WrongShareMiner,0,length(WrongShareMiner));
+   LeaveCriticalSection(CS_WrongShareMiner);
+   end
+else
+   begin
+   ToLog('.Unknown report type: '+ReportType,uToConsole);
+   exit;
+   end;
+SetLength(FinalArray,0);
+for counter := 0 to length(CopyArray)-1 do
+   begin
+   Added := false;
+   for count2 := 0 to length(FinalArray)-1 do
+      begin
+      if CopyArray[counter].counter>FinalArray[count2].counter then
+         begin
+         Insert(CopyArray[counter],FinalArray,count2);
+         Added := true;
+         break;
+         end;
+      end;
+   if not Added then Insert(CopyArray[counter],FinalArray,Length(FinalArray));
+   end;
+
+if Destination = uToConsole then
+   begin
+   if ( (NumberRecords=0) or (numberRecords>length(FinalArray)) ) then
+      NumberRecords := length(FinalArray);
+   ToLog(','+ReportTitle,uToConsole);
+   ToLog('/--------------------------------------',uToConsole);
+   MinerApp := Format('%0:-20s',[Dataname]);
+   thisCounter := Format('%0:-5s',['Total']);
+   thisinBlock := Format('%0:-5s',['Block']);
+   ToLog(Format('/%s | %s | %s |',[MinerApp,ThisCounter, ThisinBlock]),uToConsole);
+   ToLog('/--------------------------------------',uToConsole);
+   for counter := 0 to NumberRecords-1 do
+      begin
+      MinerApp := Format('%0:-20s',[FinalArray[counter].data]);
+      thisCounter := Format('%0:5s',[FinalArray[counter].counter.ToString]);
+      thisinBlock := Format('%0:5s',[FinalArray[counter].inBlock.ToString]);
+      ToLog(Format(' %s | %s | %s |',[MinerApp,ThisCounter,ThisInBlock]),uToConsole);
+      Inc(TotalRecords);
+      end;
+   if TotalRecords= 0 then ToLog('.No records found',uToConsole);
+   ToLog('/--------------------------------------',uToConsole);
+   end;
+
 End;
 
 Procedure BuildNewBlock();
@@ -1186,6 +1354,10 @@ SESSION_Shares := 0;
 SESSION_Started := UTCTime;
 RejectedShares := 0;
 if StoreShares then SaveShareIndex;
+ClearUserMinerArray(False);
+ClearUserIPArray(False);
+ClearShareIPArray(False);
+ClearWrongShareMiner(False);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -1233,7 +1405,7 @@ TRY
 Acontext.Connection.IOHandler.WriteLn(message);
 EXCEPT on E:Exception do
    begin
-   ToLog(' Error sending message to miner: '+E.Message);
+   ToLog(' Error sending message to miner: '+E.Message,uToFile);
    end;
 END;{Try}
 End;
@@ -1250,7 +1422,7 @@ Acontext.Connection.IOHandler.InputBuffer.Clear;
 AContext.Connection.Disconnect;
 AContext.Connection.IOHandler.DiscardAll(); // ?? is valid
 EXCEPT on E:Exception do
-   ToLog(' Error closing miner conneciton: '+E.Message);
+   ToLog(' Error closing miner conneciton: '+E.Message,uToFile);
 END;{Try}
 End;
 
@@ -1292,6 +1464,8 @@ Command := Parameter(Linea,0);
 Address := Parameter(Linea,1);
 If UpperCase(Command) = 'SOURCE' then
    begin
+   AddUserMiner(Parameter(Linea,2));
+   AddUserIP(IPUser);
    if ( (not IsValidHashAddress(Address)) or (address = '') ) then
       begin
       TryClosePoolConnection(AContext,'WRONG_ADDRESS');
@@ -1320,10 +1494,9 @@ If UpperCase(Command) = 'SOURCE' then
       end;
    end
 else If UpperCase(Command) = 'SHARE' then
+   //{1}Addess {2}Share {3}Miner
    begin
    ThisShare   := Parameter(Linea,2);
-   MinerDevice := Parameter(Linea,3);
-   if MinerDevice = '' then MinerDevice:='Unknown';
    ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser);
    if ValidShareValue=0 then
       begin
@@ -1396,13 +1569,13 @@ If success then
 
    if WasGood then
       begin
-      ToLog(',Besthash submited: '+BestHashReadeable(Data.Diff));
+      ToLog(',Besthash submited: '+BestHashReadeable(Data.Diff),uToFile);
       Inc(SESSION_BestHashes);
       end;
    end
 else
    begin
-   ToLog(' Unable to send solution');
+   ToLog(' Unable to send solution',uToFile);
    SetSolution(GetSolution);
    end;
 End;
@@ -1635,6 +1808,197 @@ for counter := 0 to length(ArrayMiner)-1 do
    if ArrayMiner[counter] = PoolAddress then Inc(Mined);
 BlocksMinedByPool := mined;
 End;
+
+// ********
+// Counters
+// ********
+
+Procedure AddUserMiner(Minerv:String);
+var
+  counter : integer;
+  Added : boolean = false;
+Begin
+if minerv = '' then Minerv := 'Unknown';
+EnterCriticalSection(CS_USerMiner);
+For counter := 0 to length(UserMiner)-1 do
+   begin
+   if userminer[counter].data=Minerv then
+      begin
+      added := true;
+      Inc(UserMiner[counter].counter);
+      Inc(UserMiner[counter].inblock);
+      break;
+      end;
+   end;
+if not added then
+   begin
+   SetLEngth(Userminer,LEngth(UserMiner)+1);
+   Userminer[length(userminer)-1].data:=minerv;
+   Userminer[length(userminer)-1].counter:=1;
+   Userminer[length(userminer)-1].inBlock:=1;
+   end;
+LEaveCriticalSection(CS_USerMiner);
+End;
+
+Procedure ClearUserMinerArray(ClearAll:boolean = true);
+var
+  counter:integer;
+Begin
+if ClearAll then
+   begin
+   EnterCriticalSection(CS_USerMiner);
+   SetLEngth(UserMiner,0);
+   LeaveCriticalSection(CS_USerMiner);
+   end
+else
+   begin
+   EnterCriticalSection(CS_USerMiner);
+   For counter := 0 to length(USerMiner)-1 do
+      USerMiner[counter].inblock:=0;
+   LeaveCriticalSection(CS_USerMiner);
+   end;
+End;
+
+Procedure AddUserIP(userip:string);
+var
+  counter : integer;
+  Added : boolean = false;
+Begin
+if userip = '' then userip := 'Unknown';
+EnterCriticalSection(CS_UserIPArr);
+For counter := 0 to length(UserIPArr)-1 do
+   begin
+   if UserIPArr[counter].data=UserIP then
+      begin
+      added := true;
+      Inc(UserIPArr[counter].counter);
+      Inc(UserIPArr[counter].inblock);
+      break;
+      end;
+   end;
+if not added then
+   begin
+   SetLEngth(UserIPArr,LEngth(UserIPArr)+1);
+   UserIPArr[length(UserIPArr)-1].data:=UserIP;
+   UserIPArr[length(UserIPArr)-1].counter:=1;
+   UserIPArr[length(UserIPArr)-1].inBlock:=1;
+   end;
+LEaveCriticalSection(CS_UserIPArr);
+End;
+
+Procedure ClearUserIPArray(ClearAll:boolean = true);
+var
+  counter:integer;
+Begin
+if ClearAll then
+   begin
+   EnterCriticalSection(CS_UserIPArr);
+   SetLEngth(UserIPArr,0);
+   LeaveCriticalSection(CS_UserIPArr);
+   end
+else
+   begin
+   EnterCriticalSection(CS_UserIPArr);
+   For counter := 0 to length(UserIPArr)-1 do
+      UserIPArr[counter].inblock:=0;
+   LeaveCriticalSection(CS_UserIPArr);
+   end;
+End;
+
+Procedure AddShareIP(userip:string);
+var
+  counter : integer;
+  Added : boolean = false;
+Begin
+if userip = '' then userip := 'Unknown';
+EnterCriticalSection(CS_ShareIPArr);
+For counter := 0 to length(ShareIPArr)-1 do
+   begin
+   if ShareIPArr[counter].data=UserIP then
+      begin
+      added := true;
+      Inc(ShareIPArr[counter].counter);
+      Inc(ShareIPArr[counter].inblock);
+      break;
+      end;
+   end;
+if not added then
+   begin
+   SetLEngth(ShareIPArr,LEngth(ShareIPArr)+1);
+   ShareIPArr[length(ShareIPArr)-1].data:=UserIP;
+   ShareIPArr[length(ShareIPArr)-1].counter:=1;
+   ShareIPArr[length(ShareIPArr)-1].inBlock:=1;
+   end;
+LeaveCriticalSection(CS_ShareIPArr);
+End;
+
+Procedure ClearShareIPArray(ClearAll:boolean = true);
+var
+  counter:integer;
+Begin
+if ClearAll then
+   begin
+   EnterCriticalSection(CS_ShareIPArr);
+   SetLEngth(ShareIPArr,0);
+   LeaveCriticalSection(CS_ShareIPArr);
+   end
+else
+   begin
+   EnterCriticalSection(CS_ShareIPArr);
+   For counter := 0 to length(ShareIPArr)-1 do
+      ShareIPArr[counter].inblock:=0;
+   LeaveCriticalSection(CS_ShareIPArr);
+   end;
+End;
+
+Procedure AddWrongShareMiner(userip:string);
+var
+  counter : integer;
+  Added : boolean = false;
+Begin
+if userip = '' then userip := 'Unknown';
+EnterCriticalSection(CS_WrongShareMiner);
+For counter := 0 to length(WrongShareMiner)-1 do
+   begin
+   if WrongShareMiner[counter].data=UserIP then
+      begin
+      added := true;
+      Inc(WrongShareMiner[counter].counter);
+      Inc(WrongShareMiner[counter].inblock);
+      break;
+      end;
+   end;
+if not added then
+   begin
+   SetLEngth(WrongShareMiner,LEngth(WrongShareMiner)+1);
+   WrongShareMiner[length(WrongShareMiner)-1].data:=UserIP;
+   WrongShareMiner[length(WrongShareMiner)-1].counter:=1;
+   WrongShareMiner[length(WrongShareMiner)-1].inBlock:=1;
+   end;
+LeaveCriticalSection(CS_WrongShareMiner);
+End;
+
+Procedure ClearWrongShareMiner(ClearAll:boolean = true);
+var
+  counter:integer;
+Begin
+if ClearAll then
+   begin
+   EnterCriticalSection(CS_WrongShareMiner);
+   SetLEngth(WrongShareMiner,0);
+   LeaveCriticalSection(CS_WrongShareMiner);
+   end
+else
+   begin
+   EnterCriticalSection(CS_WrongShareMiner);
+   For counter := 0 to length(WrongShareMiner)-1 do
+      WrongShareMiner[counter].inblock:=0;
+   LeaveCriticalSection(CS_WrongShareMiner);
+   end;
+End;
+
+
+
 
 END. // End unit
 

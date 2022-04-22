@@ -6,7 +6,7 @@ INTERFACE
 
 USES
   Classes, SysUtils, dateutils, IdTCPClient, IdGlobal, MD5, StrUtils, mpsignerutils,
-  base64, HlpHashFactory, nosodig.crypto;
+  base64, HlpHashFactory, nosodig.crypto, process;
 
 TYPE
 
@@ -88,6 +88,7 @@ Function PonerCeros(numero:String;cuantos:integer):string;
 //***************
 Function HashrateToShow(speed:int64):String;
 function GetMainnetTimestamp(Trys:integer=5):int64;
+Procedure RunExternalProgram(ProgramToRun:String);
 
 CONST
   HasheableChars = '!"#$%&#39)*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
@@ -980,6 +981,32 @@ Inc(Trys);
 UNTIL ( (WasDone) or (Trys = 5) );
 if client.Connected then Client.Disconnect();
 client.Free;
+End;
+
+Procedure RunExternalProgram(ProgramToRun:String);
+var
+  Process: TProcess;
+  I: Integer;
+begin
+Process := TProcess.Create(nil);
+   TRY
+   Process.InheritHandles := False;
+   Process.Options := [];
+   Process.ShowWindow := swoShow;
+   for I := 1 to GetEnvironmentVariableCount do
+      Process.Environment.Add(GetEnvironmentString(I));
+   {$IFDEF UNIX}
+   process.Executable := 'bash';
+   process.Parameters.Add(ProgramToRun);
+   {$ENDIF}
+   {$IFDEF WINDOWS}
+   Process.Executable := ProgramToRun;
+   {$ENDIF}
+   Process.Execute;
+   EXCEPT ON E:Exception do
+
+   END; {TRY}
+Process.Free;
 End;
 
 INITIALIZATION
