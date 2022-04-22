@@ -1082,6 +1082,7 @@ For counter := 0 to length(CopyArray)-1 do
       ClearAddressBalance(CopyArray[counter].address,ThisBlock.ToString+':'+CopyArray[counter].Balance.ToString+':'+'OwnPayment');
       end;
    end;
+
 if PayingAddresses>0 then
    begin
    ToLog(Format(' Paying to %d addresses : %s',[PayingAddresses,Int2Curr(TotalToPay)]));
@@ -1220,7 +1221,7 @@ else if Uppercase(ReportType) = 'SHAREIP' then
    CopyArray := Copy(ShareIPArr,0,length(ShareIPArr));
    LeaveCriticalSection(CS_ShareIPArr);
    end
-else if Uppercase(ReportType) = 'WRONGM' then
+else if Uppercase(ReportType) = 'WRONGSM' then
    begin
    ReportTitle := 'Wrong Shares Miner Report';
    Dataname    := 'MinerApp';
