@@ -6,9 +6,9 @@
 [![Latest Release](https://img.shields.io/github/v/release/Noso-Project/consopool?label=latest%20release)](https://github.com/Noso-Project/consopool/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/Noso-Project/consopool/total)](https://github.com/Noso-Project/consopool/releases)
 
-Console miner for Noso cryptocoin
+Pool minning server for noso crypto currency
 
-## Running the consominer
+## Running consopool
 
 Needs to be completed
 
@@ -31,6 +31,8 @@ The best way to ensure that these packages are the latest version is to install 
 The Windows version has been tested on:
 
 - Windows 8.1
+
+- Windows Server 2019 Datacenter
 
 ### Linux
 
