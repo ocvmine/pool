@@ -238,11 +238,13 @@ else if commandtoshow = 'REPORT' then
    RawToConsole(',Report command');
    RawToConsole('/Available options');
    RawToConsole(' -n:number -> Shows up to number entries');
+   RawToConsole(' -r        -> Resets the report');
    RawToConsole('/Available report');
-   RawToConsole(' miners  -> Miner app used for SOURCE request');
-   RawToConsole(' ips     -> User IPv4 on SOURCE request');
-   RawToConsole(' shareip -> User IPv4 off valid shares');
-   RawToConsole(' wrongsm -> Miner app of wrong shares');
+   RawToConsole(' miners     -> Miner app used for SOURCE request');
+   RawToConsole(' ips        -> User IPv4 on SOURCE request');
+   RawToConsole(' shareip    -> User IPv4 off valid shares');
+   RawToConsole(' wrongminer -> Miner app of wrong shares');
+   RawToConsole(' wrongip    -> User IPv4 of wrong shares');
    end
 else RawToConsole('.Unknown command: '+commandtoshow);
 End;
@@ -359,6 +361,7 @@ DoneCriticalSection(CS_USerMiner);
 DoneCriticalSection(CS_UserIPArr);
 DoneCriticalSection(CS_ShareIPArr);
 DoneCriticalSection(CS_WrongShareMiner);
+DoneCriticalSection(CS_WrongShareIp);
 End;
 
 BEGIN
@@ -377,6 +380,7 @@ InitCriticalSection(CS_USerMiner);
 InitCriticalSection(CS_UserIPArr);
 InitCriticalSection(CS_ShareIPArr);
 InitCriticalSection(CS_WrongShareMiner);
+InitCriticalSection(CS_WrongShareIp);
 
 
 SetLength(LogLines,0);
@@ -387,6 +391,7 @@ SetLength(ConsoleLines,0);
 SetLength(UserMiner,0);
 SetLength(UserIpArr,0);
 SetLength(WrongShareMiner,0);
+SetLength(WrongShareIp,0);
 
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
@@ -455,7 +460,11 @@ REPEAT
          LastConsensusTry := UTCTime;
          PrintLine(4);
          End;
-      if RefreshUpTime <> UTCtime then PrintLine(6);
+      if RefreshUpTime <> UTCtime then
+         begin
+         PrintLine(6);
+         printline(5);
+         end;
       if RefreshPoolHeader then
          begin
          RefreshPoolHeader := false;

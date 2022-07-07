@@ -136,17 +136,19 @@ Procedure AddShareIP(userip:string);
 Procedure ClearShareIPArray(ClearAll:boolean = true);
 Procedure AddWrongShareMiner(userip:string);
 Procedure ClearWrongShareMiner(ClearAll:boolean = true);
+Procedure AddWrongShareIp(ThisData:string);
+Procedure ClearWrongShareIp(ClearAll:boolean = true);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.40';
+  AppVersion = 'v0.42';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
   // Predefined Types fpr OutPut
   uToBoth      = 0;
-  uToFile  = 1;
-  uToConsole = 2;
+  uToFile      = 1;
+  uToConsole   = 2;
 
 
 VAR
@@ -157,6 +159,8 @@ VAR
   UserIPArr       : array of TCounter;
   ShareIPArr      : array of TCounter;
   WrongShareMiner : array of TCounter;
+  WrongShareIp    : array of TCounter;
+
   // Files
   configfile, LogFile, OldLogFile, PaysFile : TextFile;
   MinersFile : File of TMinersData;
@@ -241,6 +245,7 @@ VAR
   CS_UserIPArr       : TRTLCriticalSection;
   CS_ShareIPArr      : TRTLCriticalSection;
   CS_WrongShareMiner : TRTLCriticalSection;
+  CS_WrongShareIp    : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -313,9 +318,8 @@ TextToSend := 'NSLORDER 1 0.16 '+TrxTime.ToString+' ORDER 1 $TRFR '+OrdHash+' 1 
               ' Pool_Payment 1 '+PublicKey+' '+PoolAddress+' '+Address+' '+Fee.ToString+' '+ToSend.ToString+' '+
               SignString+' '+trfHash;
 Resultado  := SendOrder(TextToSend);
-if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') ) then
+if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') and(Resultado<>'Closing NODE') ) then
    begin
-
    LastPayInfo := (GetMainConsensus.block+1).ToString+':'+ToSend.ToString+':'+Resultado;
    ClearAddressBalance(Address, LastPayInfo);
    AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
@@ -700,6 +704,7 @@ if ShareAlreadyExists(Share) then
    result := 4;
    Inc(RejectedShares);
    AddWrongShareMiner(MinerProgram);
+   AddWrongShareIp(IPUser);
    end
 else if ((length(Share)<18) or (length(Share)>33)) then
    begin
@@ -707,6 +712,7 @@ else if ((length(Share)<18) or (length(Share)>33)) then
    result := 7;
    Inc(RejectedShares);
    AddWrongShareMiner(MinerProgram);
+   AddWrongShareIp(IPUser);
    end
 else
    begin
@@ -719,7 +725,7 @@ else
       CreditShare(Address,IPUser);
       If StoreShares then CreditFrequency(ThisDiff);
       Inc(SESSION_Shares);
-      UpdateServerInfo := true;
+      //UpdateServerInfo := true;
       if ThisDiff<MainBestDiff then
          begin
          ThisSolution.Hash:=Share;
@@ -742,6 +748,7 @@ else
       ToLog(Format(' Error 5 [%s] [%s]',[MinerProgram,IPUser]),uToFile);
       Inc(RejectedShares);
       AddWrongShareMiner(MinerProgram);
+      AddWrongShareIp(IPUser);
       end;
    end;
 End;
@@ -846,7 +853,7 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'IPMINERS' then IPMiners := StrToIntDef(Parameter(linea,1),IPMiners);
    if uppercase(Parameter(linea,0)) = 'AUTOSTART' then PoolAuto := StrToBool(Parameter(linea,1));
    if uppercase(Parameter(linea,0)) = 'AUTODIFF' then AutoDiff := StrToBool(Parameter(linea,1));
-   if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then IPMiners := StrToIntDef(Parameter(linea,1),AutoValue);
+   if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then AutoValue := StrToIntDef(Parameter(linea,1),AutoValue);
    end;
 EXCEPT ON E:EXCEPTION do
    begin
@@ -1082,7 +1089,6 @@ For counter := 0 to length(CopyArray)-1 do
       ClearAddressBalance(CopyArray[counter].address,ThisBlock.ToString+':'+CopyArray[counter].Balance.ToString+':'+'OwnPayment');
       end;
    end;
-
 if PayingAddresses>0 then
    begin
    ToLog(Format(' Paying to %d addresses : %s',[PayingAddresses,Int2Curr(TotalToPay)]));
@@ -1193,6 +1199,16 @@ if Pos(' -n:',linea) > 0 then
    begin
    substring := copy(linea,Pos(' -n:',linea)+4,length(linea));
    NumberRecords := StrToIntDef(Parameter(substring,0),0);
+   end
+else if Pos(' -r',linea) > 0 then
+   begin
+   if Uppercase(ReportType) = 'MINERS' then ClearUserMinerArray
+   else if Uppercase(ReportType) = 'IPS' then ClearUserIPArray
+   else if Uppercase(ReportType) = 'SHAREIP' then ClearShareIPArray
+   else if Uppercase(ReportType) = 'WRONGMINER' then ClearWrongShareMiner
+   else if Uppercase(ReportType) = 'WRONGIP' then ClearWrongShareIp
+   else ToLog('.Unknown report type: '+ReportType,uToConsole);
+   exit;
    end;
 if Uppercase(ReportType) = 'MINERS' then
    begin
@@ -1221,7 +1237,7 @@ else if Uppercase(ReportType) = 'SHAREIP' then
    CopyArray := Copy(ShareIPArr,0,length(ShareIPArr));
    LeaveCriticalSection(CS_ShareIPArr);
    end
-else if Uppercase(ReportType) = 'WRONGSM' then
+else if Uppercase(ReportType) = 'WRONGMINER' then
    begin
    ReportTitle := 'Wrong Shares Miner Report';
    Dataname    := 'MinerApp';
@@ -1229,6 +1245,15 @@ else if Uppercase(ReportType) = 'WRONGSM' then
    EnterCriticalSection(CS_WrongShareMiner);
    CopyArray := Copy(WrongShareMiner,0,length(WrongShareMiner));
    LeaveCriticalSection(CS_WrongShareMiner);
+   end
+else if Uppercase(ReportType) = 'WRONGIP' then
+   begin
+   ReportTitle := 'Wrong Shares IP Report';
+   Dataname    := 'User IP';
+   SetLength(CopyArray,0);
+   EnterCriticalSection(CS_WrongShareIp);
+   CopyArray := Copy(WrongShareIp,0,length(WrongShareIp));
+   LeaveCriticalSection(CS_WrongShareIp);
    end
 else
    begin
@@ -1359,6 +1384,7 @@ ClearUserMinerArray(False);
 ClearUserIPArray(False);
 ClearShareIPArray(False);
 ClearWrongShareMiner(False);
+ClearWrongShareIP(False);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -1995,6 +2021,52 @@ else
    For counter := 0 to length(WrongShareMiner)-1 do
       WrongShareMiner[counter].inblock:=0;
    LeaveCriticalSection(CS_WrongShareMiner);
+   end;
+End;
+
+Procedure AddWrongShareIp(ThisData:string);
+var
+  counter : integer;
+  Added : boolean = false;
+Begin
+if ThisData = '' then ThisData := 'Unknown';
+EnterCriticalSection(CS_WrongShareIp);
+For counter := 0 to length(WrongShareIp)-1 do
+   begin
+   if WrongShareIp[counter].data=ThisData then
+      begin
+      added := true;
+      Inc(WrongShareIp[counter].counter);
+      Inc(WrongShareIp[counter].inblock);
+      break;
+      end;
+   end;
+if not added then
+   begin
+   SetLEngth(WrongShareIp,LEngth(WrongShareIp)+1);
+   WrongShareIp[length(WrongShareIp)-1].data:=ThisData;
+   WrongShareIp[length(WrongShareIp)-1].counter:=1;
+   WrongShareIp[length(WrongShareIp)-1].inBlock:=1;
+   end;
+LeaveCriticalSection(CS_WrongShareIp);
+End;
+
+Procedure ClearWrongShareIp(ClearAll:boolean = true);
+var
+  counter:integer;
+Begin
+if ClearAll then
+   begin
+   EnterCriticalSection(CS_WrongShareIp);
+   SetLEngth(WrongShareIp,0);
+   LeaveCriticalSection(CS_WrongShareIp);
+   end
+else
+   begin
+   EnterCriticalSection(CS_WrongShareIp);
+   For counter := 0 to length(WrongShareIp)-1 do
+      WrongShareIp[counter].inblock:=0;
+   LeaveCriticalSection(CS_WrongShareIp);
    end;
 End;
 
