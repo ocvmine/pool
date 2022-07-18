@@ -141,11 +141,11 @@ Procedure ClearWrongShareIp(ClearAll:boolean = true);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.42';
+  AppVersion = 'v0.43';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
-  // Predefined Types fpr OutPut
+  // Predefined Types for OutPut
   uToBoth      = 0;
   uToFile      = 1;
   uToConsole   = 2;
@@ -1554,13 +1554,13 @@ End;
 
 Procedure SendSolution(Data:TSolution);
 var
-  TCPClient : TidTCPClient;
-  Node : integer;
-  Resultado : string;
-  Trys : integer = 0;
+  TCPClient        : TidTCPClient;
+  Node             : integer;
+  Resultado        : string;
+  Trys             : integer = 0;
   Success, WasGood : boolean;
-  Mainnetbest : string;
-  ErrorCode : String;
+  Mainnetbest      : string;
+  ErrorCode        : String;
 Begin
 Node := Random(LengthNodes);
 TCPClient := TidTCPClient.Create(nil);

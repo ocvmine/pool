@@ -106,10 +106,13 @@ var
   CS_CSThread   : TRTLCriticalSection;
   CS_Consensus  : TRTLCriticalSection;
   NodesArray    : Array of TNodeData;
-  DefaultNodes  : String = '23.94.21.83:8080 '+'109.230.238.240:8080 '+
-                           '107.175.59.177:8080 '+'107.172.193.176:8080 '+
-                           '66.151.117.247:8080 '+'192.3.73.184:8080 '+'107.175.24.151:8080 '+
-                           '107.174.137.27:8080';
+  DefaultNodes  : String = '198.144.190.194:8080 '+  // up
+                           '109.230.238.240:8080 '+  // up
+                           '107.172.193.176:8080 '+  // up
+                           '66.151.117.247:8080 '+   // up
+                           '192.3.73.184:8080 '+     // up
+                           '107.175.24.151:8080 '+   // up
+                           '3.111.137.132:58445';    // down, migrated to new ip
 
 IMPLEMENTATION
 
