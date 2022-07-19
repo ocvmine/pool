@@ -53,7 +53,7 @@ function Int2Curr(Value: int64): string;
 Function BestHashReadeable(BestDiff:String):string;
 Function GetDiffHashrate(bestdiff:String):integer;
 Function GetConsensus():Boolean;
-Procedure LoadNodes();
+Procedure LoadNodes(linextext:string);
 Procedure SetMainConsensus(New:TnodeData);
 Function GetMainConsensus():TNodeData;
 Function GetNodeIndex(Index:integer):TNodeData;
@@ -89,6 +89,8 @@ Function PonerCeros(numero:String;cuantos:integer):string;
 Function HashrateToShow(speed:int64):String;
 function GetMainnetTimestamp(Trys:integer=5):int64;
 Procedure RunExternalProgram(ProgramToRun:String);
+Function GetVerificators(LineText:String):String;
+function GetMNsFromNode(Trys:integer=5):string;
 
 CONST
   HasheableChars = '!"#$%&#39)*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
@@ -112,7 +114,7 @@ var
                            '66.151.117.247:8080 '+   // up
                            '192.3.73.184:8080 '+     // up
                            '107.175.24.151:8080 '+   // up
-                           '3.111.137.132:58445';    // down, migrated to new ip
+                           '3.111.137.132:58445';    // up
 
 IMPLEMENTATION
 
@@ -402,22 +404,25 @@ If ContactedNodes>=(LengthNodes div 2) then
    end;
 End;
 
-Procedure LoadNodes();
+Procedure LoadNodes(linextext:string);
 var
   ThisNode : String  = '';
   Counter  : integer = 0;
   NewNode : TNodeData;
 Begin
+if linextext <> DefaultNodes then
+   linextext := GetVerificators(linextext);
 EnterCriticalSection(CS_NodesArray);
 SetLength(NodesArray,0);
 REPEAT
    Begin
    ThisNode := '';
-   ThisNode := Parameter(DefaultNodes,counter);
+   ThisNode := Parameter(linextext,counter);
    If ThisNode <> '' then
       begin
       NewNode := Default(TNodeData);
       ThisNode := StringReplace(ThisNode,':',' ',[rfReplaceAll, rfIgnoreCase]);
+      ThisNode := StringReplace(ThisNode,';',' ',[rfReplaceAll, rfIgnoreCase]);
       NewNode.host:=Parameter(ThisNode,0);
       NewNode.port:=StrToIntDef(Parameter(ThisNode,1),8080);
       Insert(NewNode,NodesArray,length(NodesArray));
@@ -1010,6 +1015,99 @@ Process := TProcess.Create(nil);
 
    END; {TRY}
 Process.Free;
+End;
+
+Function GetVerificators(LineText:String):String;
+type
+  TMNData     = packed record
+   ip      : string[15];
+   port    : integer;
+   Address : string[32];
+   Count   : integer;
+   end;
+var
+  counter   : integer = 1;
+  count2    : integer;
+  ThisParam : string;
+  ThisMN    : TMnData;
+  Ip        : string;
+  Port      : integer;
+  Address   : string;
+  Count     : integer;
+  ArrNodes  : array of TMnData;
+  Added     : boolean;
+  VersCount : integer;
+Begin
+result := '';
+SetLEngth(ArrNodes,0);
+repeat
+  thisParam := Parameter(LineText,counter);
+  if ThisParam <>'' then
+     begin
+     Added := false;
+     ThisParam := StringReplace(ThisParam,':',' ',[rfReplaceAll, rfIgnoreCase]);
+     ThisParam := StringReplace(ThisParam,';',' ',[rfReplaceAll, rfIgnoreCase]);
+     ThisMN.Ip := Parameter(ThisParam,0);
+     ThisMN.Port := StrToIntDef(Parameter(ThisParam,1),8080);
+     ThisMN.Address := Parameter(ThisParam,2);
+     ThisMN.Count   := StrToIntDef(Parameter(ThisParam,3),1);
+     if Length(ArrNodes) = 0 then Insert(ThisMN,ArrNodes,0)
+     else
+        begin
+        for count2 := 0 to length(ArrNodes)-1 do
+           begin
+           if ThisMN.count > ArrNodes[count2].count then
+              begin
+              Insert(ThisMN,ArrNodes,count2);
+              Added := true;
+              Break;
+              end;
+           end;
+        if not Added then Insert(ThisMN,ArrNodes,length(ArrNodes));
+        end;
+     end;
+  Inc(Counter);
+until thisParam = '';
+VersCount := (length(ArrNodes) div 10)+3;
+Delete(ArrNodes,VersCount,Length(ArrNodes));
+for counter := 0 to length(ArrNodes)-1 do
+   begin
+   Result := Result+ ArrNodes[counter].ip+';'+IntToStr(ArrNodes[counter].port)+':'+ArrNodes[counter].address+':'+
+             IntToStr(ArrNodes[counter].count)+' ';
+   end;
+Result := Trim(Result);
+End;
+
+function GetMNsFromNode(Trys:integer=5):string;
+var
+  Client : TidTCPClient;
+  RanNode : integer;
+  ThisNode : TNodeData;
+  WasDone : boolean = false;
+Begin
+Result := '';
+REPEAT
+   RanNode := Random(LengthNodes);
+   ThisNode := GetNodeIndex(RanNode);
+   Client := TidTCPClient.Create(nil);
+   Client.Host:=ThisNode.host;
+   Client.Port:=ThisNode.port;
+   Client.ConnectTimeout:= 3000;
+   Client.ReadTimeout:= 3000;
+   TRY
+   Client.Connect;
+   Client.IOHandler.WriteLn('NSLMNS');
+   Result := Client.IOHandler.ReadLn(IndyTextEncoding_UTF8);
+   WasDone := true;
+   EXCEPT on E:Exception do
+      begin
+      WasDone := False;
+      end;
+   END{Try};
+Inc(Trys);
+UNTIL ( (WasDone) or (Trys = 5) );
+if client.Connected then Client.Disconnect();
+client.Free;
 End;
 
 INITIALIZATION

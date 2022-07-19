@@ -60,6 +60,9 @@ Procedure CreateMinersFile();
 Procedure SaveMiners();
 Procedure CreateBlockzero();
 Procedure createPaymentsFile();
+Procedure createNodesFile();
+Function GetNodesFileData():String;
+Procedure SaveMnsToDisk(lineText:string);
 function GetMyLastUpdatedBlock():int64;
 Procedure LoadMiners();
 Function MinersCount():integer;
@@ -141,7 +144,7 @@ Procedure ClearWrongShareIp(ClearAll:boolean = true);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.43';
+  AppVersion = 'v0.44';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -177,6 +180,8 @@ VAR
   AutoDiff     : boolean = true;
   AutoValue    : integer = 500;
   // Operative
+  previousNodes: string;
+  ThisBlockMNs : boolean = false;
   ArraySols    : array of integer;
   ArrayMiner   : array of string;
   ShareIndex   : array[0..15] of integer;
@@ -496,8 +501,77 @@ rewrite(ThisFile);
 CloseFile(ThisFile);
 EXCEPT ON E:EXCEPTION do
    begin
-   writeln('Error creating block 0');
+   writeln('Error creating payments file');
    Halt(1);
+   end;
+END {TRY};
+End;
+
+Procedure createNodesFile();
+var
+  ThisFile : TextFile;
+Begin
+AssignFile(ThisFile,'nodes.txt');
+TRY
+rewrite(ThisFile);
+write(ThisFile,'0 109.230.238.240;8080:N3iEmfEoYhW99Gn6U6EaLfJ3bqmWCD3:114 '+
+                      '198.144.190.194;8080:N4DixvMj1ZEBhm1xbxmCNursoZxPeH1:114 '+
+                      '107.175.59.177;8080:N4VJxLRtbvngmThBJohq7aHd5BwKbFf:76 '+
+                      '107.172.193.176;8080:N3sb23UXr23Som3B11u5q7qR9FvsDC7:114 '+
+                      '66.151.117.247;8080:NUhcAdqnVDHtd8NmMMo6sLK3bmYFE5:56 '+
+                      '192.3.73.184;8080:N2RJi7FYf76UBH9RyhndTofskzHKuEe:114 '+
+                      '107.175.24.151;8080:N4HrfiM6YVw2g4oAmWGKCvU5PXpZ2DM:126 '+
+                      '149.57.137.108;8080:N46PiNk7chSURJJZoMSRdwsDh8FAbDa:114 '+
+                      '3.111.137.132;58445:N4PeJyqj8diSXnfhxSQdLpo8ddXTaGd:176');
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   writeln('Error creating nodes file');
+   Halt(1);
+   end;
+END {TRY};
+previousNodes := '0 109.230.238.240;8080:N3iEmfEoYhW99Gn6U6EaLfJ3bqmWCD3:114 '+
+                      '198.144.190.194;8080:N4DixvMj1ZEBhm1xbxmCNursoZxPeH1:114 '+
+                      '107.175.59.177;8080:N4VJxLRtbvngmThBJohq7aHd5BwKbFf:76 '+
+                      '107.172.193.176;8080:N3sb23UXr23Som3B11u5q7qR9FvsDC7:114 '+
+                      '66.151.117.247;8080:NUhcAdqnVDHtd8NmMMo6sLK3bmYFE5:56 '+
+                      '192.3.73.184;8080:N2RJi7FYf76UBH9RyhndTofskzHKuEe:114 '+
+                      '107.175.24.151;8080:N4HrfiM6YVw2g4oAmWGKCvU5PXpZ2DM:126 '+
+                      '149.57.137.108;8080:N46PiNk7chSURJJZoMSRdwsDh8FAbDa:114 '+
+                      '3.111.137.132;58445:N4PeJyqj8diSXnfhxSQdLpo8ddXTaGd:176';
+End;
+
+Function GetNodesFileData():String;
+var
+  ThisFile : TextFile;
+Begin
+result := '';
+AssignFile(ThisFile,'nodes.txt');
+TRY
+reset(ThisFile);
+Readln(ThisFile,result);
+PreviousNodes := Result;
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   result := previousNodes
+   end;
+END {TRY};
+End;
+
+Procedure SaveMnsToDisk(lineText:string);
+var
+  ThisFile : TextFile;
+Begin
+if LineText = '' then exit;
+AssignFile(ThisFile,'nodes.txt');
+TRY
+rewrite(ThisFile);
+write(ThisFile,lineText);
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+
    end;
 END {TRY};
 End;
@@ -1340,6 +1414,7 @@ Insert(GetDiffHashrate(GetMainConsensus.LBSolDiff),ArraySols,length(ArraySols));
 Delete(ArraySols,0,1);
 CalculateMainNetHashrate;
 Insert(GetMainConsensus.LBMiner,ArrayMiner,length(ArrayMiner));
+ThisBlockMNs := false;
 Delete(ArrayMiner,0,1);
 GetBlocksMinedByPool;
 if AutoDiff then

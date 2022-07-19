@@ -21,6 +21,7 @@ var
   ConsoleActive : boolean = true;
   ConsoleLines  : array of string;
   LAstShowed    : integer = 0;
+  MNsTextDown   : string;
 
 // Prints the specified line of the screen
 Procedure PrintLine(number:integer;IfText:String='');
@@ -407,6 +408,7 @@ Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
 if not FileExists('blocks'+DirectorySeparator+'0.txt') then CreateBlockzero();
 if not fileExists('payments.txt') then createPaymentsFile;
+if not fileExists('nodes.txt') then createNodesFile;
 if not fileExists('frequency.dat') then SaveShareIndex;
 if StoreShares then LoadShareIndex;
 Assignfile(PaysFile,'payments.txt');
@@ -419,7 +421,7 @@ If not ResetLogs then
    end;
 if not FileExists('consopool.cfg') then SaveConfig();
 LoadConfig();
-LoadNodes;
+LoadNodes(GetNodesFileData());
 InitServer;
 
 if PoolAddress='' then CloseTheApp('Pool address is empty');
@@ -474,6 +476,14 @@ REPEAT
          begin
          RefreshPoolBalance := false;
          PrintLine(3);
+         end;
+      if ( (MainConsensus.LBTimeEnd >= 300) and (not ThisBlockMNs) ) then
+         begin
+         MNsTextDown := GetMNsFromNode;
+         SaveMnsToDisk(MNsTextDown);
+         LoadNodes(GetNodesFileData());
+         ToLog(Format(' Nodes updated: %d Verificators',[length(NodesArray)]));
+         ThisBlockMNs := true;
          end;
       if RefreshAge<> UTCTime then
          begin
