@@ -332,7 +332,7 @@ if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') and(Resultado<>'Clo
    end
 else
    begin
-   ErrorCode := StrToIntDef(Parameter(Resultado,0),-1);
+   ErrorCode := StrToIntDef(Parameter(Resultado,0),-99);
    ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString,uToFile);
    end;
 DecreasePayThreads(WasGood);
@@ -1112,9 +1112,11 @@ var
   PerShare     : int64;
   Comision     : int64;
   Earned       : int64;
+  BaseReward   : int64;
 Begin
 Result := '';
-ToDistribute := GetMainConsensus.LBPoW;
+BaseReward := GetMainConsensus.LBPoW;
+ToDistribute := BaseReward;
 Comision := (ToDistribute * PoolFee) div 10000;
 ToDistribute := ToDistribute - Comision;
 EnterCriticalSection(CS_Miners);
@@ -1132,15 +1134,18 @@ For counter := 0 to length(ArrMiners)-1 do
 LeaveCriticalSection(CS_Miners);
 Earned := GetMainConsensus.LBPoW-(PerShare*TotalShares);
 Result := PerShare.ToString+' '+Earned.ToString;
+if (PerShare*TotalShares)+Earned <> BaseReward then
+   ToLog(Format(' Error on distribution: %d',[BaseReward-(PerShare*TotalShares)]));
 End;
 
 Procedure RunPayments();
 var
-  ThisBlock, counter : integer;
-  ThisThread : ThreadPayment;
-  CopyArray : Array of TMinersData ;
+  ThisBlock       : integer;
+  counter         : integer;
+  ThisThread      : ThreadPayment;
+  CopyArray       : Array of TMinersData ;
   PayingAddresses : integer = 0;
-  TotalToPay : int64 = 0;
+  TotalToPay      : int64 = 0;
 Begin
 ThisBlock := GetMainConsensus.block;
 SetLength(CopyArray,0);

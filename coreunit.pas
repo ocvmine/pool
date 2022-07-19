@@ -101,6 +101,7 @@ CONST
 var
   OffSet        : int64 = 0;
   MainConsensus : TNodeData;
+  ConsensusTime : int64;
   SyncingThreads: Integer;
   ContactedNodes: Integer;
   LengthNodes   : Integer;
@@ -136,8 +137,8 @@ ThisNode := GetNodeIndex(Slot);
 TCPClient := TidTCPClient.Create(nil);
 TCPclient.Host:=ThisNode.host;
 TCPclient.Port:=ThisNode.port;
-TCPclient.ConnectTimeout:= 3000;
-TCPclient.ReadTimeout:=3000;
+TCPclient.ConnectTimeout:= 500;
+TCPclient.ReadTimeout:=500;
 TRY
 TCPclient.Connect;
 TCPclient.IOHandler.WriteLn('NODESTATUS');
@@ -273,10 +274,11 @@ End;
 
 Function GetConsensus():Boolean;
 var
-  Counter  : integer;
-  UseThread: TTGetNodeStatus;
-  ArrT     : array of TConsensusData;
-  ResNode  : TNodeData;
+  Counter   : integer;
+  UseThread : TTGetNodeStatus;
+  ArrT      : array of TConsensusData;
+  ResNode   : TNodeData;
+  TimeStart : int64;
 
   function GetHighest():string;
    var
@@ -321,6 +323,7 @@ Begin
 Result := False;
 ContactedNodes := 0;
 SyncingThreads := LengthNodes;
+TimeStart := GetTickCount64;
 For Counter := 0 to LengthNodes-1 do
    begin
    UseThread := TTGetNodeStatus.Create(True,counter);
@@ -331,6 +334,7 @@ For Counter := 0 to LengthNodes-1 do
 REPEAT
    sleep(1);
 UNTIL SyncingThreadsValue <= 0;
+ConsensusTime := GetTickCount64-TimeStart;
 If ContactedNodes>=(LengthNodes div 2) then
    begin
    ResNode := Default(TNodeData);
@@ -695,7 +699,7 @@ End;
 // Returns the fee
 function GetFee(monto:int64):Int64;
 Begin
-Result := monto div 10000;
+Result := ((monto*10000) div 10001) div 10000;
 if result < 10 then result := 10;
 End;
 
@@ -1069,6 +1073,7 @@ repeat
   Inc(Counter);
 until thisParam = '';
 VersCount := (length(ArrNodes) div 10)+3;
+if VersCount<Length(ArrNodes) then VersCount := Length(ArrNodes);
 Delete(ArrNodes,VersCount,Length(ArrNodes));
 for counter := 0 to length(ArrNodes)-1 do
    begin

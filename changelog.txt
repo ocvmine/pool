@@ -1,6 +1,7 @@
 Version 0.44
 
 - Dynamic nodes implemented.
+- Consensus calculation time check.
 
 Version 0.43
 

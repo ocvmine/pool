@@ -452,6 +452,7 @@ REPEAT
          WaitingConsensus := true;
          CurrentBlock := GetMainConsensus.block;
          GetConsensus;
+         ToLog(Format(' Consensus time : %d ms',[Consensustime]));
          if GetMainConsensus.block>CurrentBlock then
             begin
             CurrentBlock := GetMainConsensus.block;
@@ -611,6 +612,7 @@ REPEAT
          PrintLine(4,'1');
          WaitingConsensus := true;
          GetConsensus;
+         ToLog(Format(' Consensus time : %d ms',[Consensustime]));
          WaitingConsensus := False;
          LastConsensusTry := UTCTime;
          PrintLine(4);
