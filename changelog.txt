@@ -1,3 +1,12 @@
+Version 0.46
+
+- Pool sends UTCTime to miner on source request.
+
+Version 0.45
+
+- Fixed verificators calculation
+- Fixed saving empty nodes.
+
 Version 0.44
 
 - Dynamic nodes implemented.

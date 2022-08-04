@@ -109,13 +109,17 @@ var
   CS_CSThread   : TRTLCriticalSection;
   CS_Consensus  : TRTLCriticalSection;
   NodesArray    : Array of TNodeData;
-  DefaultNodes  : String = '198.144.190.194:8080 '+  // up
-                           '109.230.238.240:8080 '+  // up
-                           '107.172.193.176:8080 '+  // up
-                           '66.151.117.247:8080 '+   // up
-                           '192.3.73.184:8080 '+     // up
-                           '107.175.24.151:8080 '+   // up
-                           '3.111.137.132:58445';    // up
+  DefaultNodes  : String =  'DefNodes '+
+                            '109.230.238.240 '+
+                            '149.57.235.14 '+
+                            '149.57.226.244 '+
+                            '81.22.38.101 '+
+                            '66.151.117.247 '+
+                            '149.57.229.81 '+
+                            '149.57.242.211 '+
+                            '149.57.138.12 '+
+                            '159.196.1.198 '+
+                            '101.100.138.125';
 
 IMPLEMENTATION
 
@@ -1073,7 +1077,7 @@ repeat
   Inc(Counter);
 until thisParam = '';
 VersCount := (length(ArrNodes) div 10)+3;
-if VersCount<Length(ArrNodes) then VersCount := Length(ArrNodes);
+//if VersCount<Length(ArrNodes) then VersCount := Length(ArrNodes);
 Delete(ArrNodes,VersCount,Length(ArrNodes));
 for counter := 0 to length(ArrNodes)-1 do
    begin

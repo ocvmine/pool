@@ -481,10 +481,13 @@ REPEAT
       if ( (MainConsensus.LBTimeEnd >= 300) and (not ThisBlockMNs) ) then
          begin
          MNsTextDown := GetMNsFromNode;
-         SaveMnsToDisk(MNsTextDown);
-         LoadNodes(GetNodesFileData());
-         ToLog(Format(' Nodes updated: %d Verificators',[length(NodesArray)]));
-         ThisBlockMNs := true;
+         if MNsTextDown <> '' then
+            begin
+            SaveMnsToDisk(MNsTextDown);
+            LoadNodes(GetNodesFileData());
+            ToLog(Format(' Nodes updated: %d Verificators',[length(NodesArray)]));
+            ThisBlockMNs := true;
+            end;
          end;
       if RefreshAge<> UTCTime then
          begin

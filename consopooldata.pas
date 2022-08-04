@@ -144,7 +144,7 @@ Procedure ClearWrongShareIp(ClearAll:boolean = true);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.44';
+  AppVersion = 'v0.46';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -514,15 +514,7 @@ Begin
 AssignFile(ThisFile,'nodes.txt');
 TRY
 rewrite(ThisFile);
-write(ThisFile,'0 109.230.238.240;8080:N3iEmfEoYhW99Gn6U6EaLfJ3bqmWCD3:114 '+
-                      '198.144.190.194;8080:N4DixvMj1ZEBhm1xbxmCNursoZxPeH1:114 '+
-                      '107.175.59.177;8080:N4VJxLRtbvngmThBJohq7aHd5BwKbFf:76 '+
-                      '107.172.193.176;8080:N3sb23UXr23Som3B11u5q7qR9FvsDC7:114 '+
-                      '66.151.117.247;8080:NUhcAdqnVDHtd8NmMMo6sLK3bmYFE5:56 '+
-                      '192.3.73.184;8080:N2RJi7FYf76UBH9RyhndTofskzHKuEe:114 '+
-                      '107.175.24.151;8080:N4HrfiM6YVw2g4oAmWGKCvU5PXpZ2DM:126 '+
-                      '149.57.137.108;8080:N46PiNk7chSURJJZoMSRdwsDh8FAbDa:114 '+
-                      '3.111.137.132;58445:N4PeJyqj8diSXnfhxSQdLpo8ddXTaGd:176');
+write(ThisFile,DefaultNodes);
 CloseFile(ThisFile);
 EXCEPT ON E:EXCEPTION do
    begin
@@ -530,15 +522,7 @@ EXCEPT ON E:EXCEPTION do
    Halt(1);
    end;
 END {TRY};
-previousNodes := '0 109.230.238.240;8080:N3iEmfEoYhW99Gn6U6EaLfJ3bqmWCD3:114 '+
-                      '198.144.190.194;8080:N4DixvMj1ZEBhm1xbxmCNursoZxPeH1:114 '+
-                      '107.175.59.177;8080:N4VJxLRtbvngmThBJohq7aHd5BwKbFf:76 '+
-                      '107.172.193.176;8080:N3sb23UXr23Som3B11u5q7qR9FvsDC7:114 '+
-                      '66.151.117.247;8080:NUhcAdqnVDHtd8NmMMo6sLK3bmYFE5:56 '+
-                      '192.3.73.184;8080:N2RJi7FYf76UBH9RyhndTofskzHKuEe:114 '+
-                      '107.175.24.151;8080:N4HrfiM6YVw2g4oAmWGKCvU5PXpZ2DM:126 '+
-                      '149.57.137.108;8080:N46PiNk7chSURJJZoMSRdwsDh8FAbDa:114 '+
-                      '3.111.137.132;58445:N4PeJyqj8diSXnfhxSQdLpo8ddXTaGd:176';
+previousNodes := DefaultNodes;
 End;
 
 Function GetNodesFileData():String;
@@ -1585,7 +1569,7 @@ If UpperCase(Command) = 'SOURCE' then
       MinTill:= StrToIntDef(Parameter(MinerData,1),0);
       MinPay := Parameter(MinerData,2);
       // 1{MinerPrefix} 2{MinerAddress} 3{PoolMinDiff} 4{LBHash} 5{LBNumber} 6{MinerBalance}
-      // 7{TillPayment} 8{LastPayInfo} 9{LastBlockPoolHashrate} {10}MainnetHashRate {11}PoolFee
+      // 7{TillPayment} 8{LastPayInfo} 9{LastBlockPoolHashrate} {10}MainnetHashRate {11}PoolFee 12{PoolUTCTime}
 
       TryClosePoolConnection(AContext,'OK '+{1}GetPrefixStr+' '+
                                             {2}PoolAddress+' '+
@@ -1597,7 +1581,8 @@ If UpperCase(Command) = 'SOURCE' then
                                             {8}MinPay+' '+
                                             {9}GetLastBlockRate.ToString+' '+
                                             {10}MainnetHashRate.ToString+' '+
-                                            {11}PoolFee.ToString);
+                                            {11}PoolFee.ToString+' '+
+                                            {12}UTCTime.ToString);
       end;
    end
 else If UpperCase(Command) = 'SHARE' then
