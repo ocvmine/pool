@@ -610,6 +610,7 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'MAINREPORT' then GenerateReport(uToConsole)
       else if Uppercase(Parameter(Command,0)) = 'REPORT' then CounterReport(command,uToConsole)
       else if Uppercase(Parameter(Command,0)) = 'CLS' then ClearPanel
+      else if Uppercase(Parameter(Command,0)) = 'TEST' then RunTest
       else if Uppercase(Parameter(Command,0)) = 'BALANCE' then
          begin
          ToLog(Format(',Pool Address: %s',[Int2Curr(GetAddressBalance(PoolAddress))]));

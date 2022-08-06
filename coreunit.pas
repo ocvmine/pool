@@ -988,10 +988,10 @@ var
   WasDone : boolean = false;
 Begin
 Result := 0;
+Client := TidTCPClient.Create(nil);
 REPEAT
    RanNode := Random(LengthNodes);
    ThisNode := GetNodeIndex(RanNode);
-   Client := TidTCPClient.Create(nil);
    Client.Host:=ThisNode.host;
    Client.Port:=ThisNode.port;
    Client.ConnectTimeout:= 3000;
@@ -1051,10 +1051,6 @@ var
   count2    : integer;
   ThisParam : string;
   ThisMN    : TMnData;
-  Ip        : string;
-  Port      : integer;
-  Address   : string;
-  Count     : integer;
   ArrNodes  : array of TMnData;
   Added     : boolean;
   VersCount : integer;
@@ -1130,28 +1126,7 @@ Inc(Trys);
 UNTIL ( (WasDone) or (Trys = 5) );
 if client.Connected then Client.Disconnect();
 client.Free;
-
 End;
-
-{
-Procedure SaveNewNodes(TLine:String);
-var
-  ThisFile : TextFile;
-Begin
-result := '';
-AssignFile(ThisFile,'nodes.txt');
-TRY
-reset(ThisFile);
-Readln(ThisFile,result);
-PreviousNodes := Result;
-CloseFile(ThisFile);
-EXCEPT ON E:EXCEPTION do
-   begin
-   result := previousNodes
-   end;
-END {TRY};
-End;
-}
 
 INITIALIZATION
 InitCriticalSection(CS_NodesArray);

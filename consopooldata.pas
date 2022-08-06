@@ -142,9 +142,13 @@ Procedure ClearWrongShareMiner(ClearAll:boolean = true);
 Procedure AddWrongShareIp(ThisData:string);
 Procedure ClearWrongShareIp(ClearAll:boolean = true);
 
+//Debug
+
+Procedure RunTest();
+
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.47';
+  AppVersion = 'v0.48';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -169,6 +173,7 @@ VAR
   MinersFile : File of TMinersData;
   //TempMinersFile : File of TMinersData2;
   // Config values
+  PoolName     : string[15] = 'mypool';
   PoolPort     : integer = 8082;
   MinDiffBase  : string  = '00000';
   PoolFee      : integer = 100;
@@ -320,7 +325,7 @@ SignString := GetStringSigned(TrxTime.ToString+PoolAddress+Address+ToSend.ToStri
                      Fee.ToString+'1',PrivateKey);
 
 TextToSend := 'NSLORDER 1 0.16 '+TrxTime.ToString+' ORDER 1 $TRFR '+OrdHash+' 1 TRFR '+TrxTime.ToString+
-              ' Pool_Payment 1 '+PublicKey+' '+PoolAddress+' '+Address+' '+Fee.ToString+' '+ToSend.ToString+' '+
+              ' PoolPay_'+PoolName+' 1 '+PublicKey+' '+PoolAddress+' '+Address+' '+Fee.ToString+' '+ToSend.ToString+' '+
               SignString+' '+trfHash;
 Resultado  := SendOrder(TextToSend);
 if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') and(Resultado<>'Closing NODE') ) then
@@ -370,15 +375,14 @@ var
   WasDone : Boolean = false;
 Begin
 Result := '';
+Client := TidTCPClient.Create(nil);
 REPEAT
    RanNode := Random(LengthNodes);
    ThisNode := GetNodeIndex(RanNode);
-   Client := TidTCPClient.Create(nil);
    Client.Host:=ThisNode.host;
    Client.Port:=ThisNode.port;
    Client.ConnectTimeout:= 3000;
    Client.ReadTimeout:=3000;
-
    TRY
    Client.Connect;
    Client.IOHandler.WriteLn(OrderString);
@@ -404,10 +408,10 @@ var
   WasDone : boolean = false;
 Begin
 Result := 0;
+Client := TidTCPClient.Create(nil);
 REPEAT
    RanNode := Random(LengthNodes);
    ThisNode := GetNodeIndex(RanNode);
-   Client := TidTCPClient.Create(nil);
    Client.Host:=ThisNode.host;
    Client.Port:=ThisNode.port;
    Client.ConnectTimeout:= 1000;
@@ -446,12 +450,13 @@ Procedure SaveMiners();
 var
   Counter      : integer;
   AlreadyAdded : string = '';
-  Errored      : boolean = false;
+  FileIsOpen   : Boolean = false;
 Begin
 EnterCriticalSection(CS_Miners);
 TRY
-rewrite(MinersFile);
    TRY
+   rewrite(MinersFile);
+   FileIsOpen := true;
    for counter := 0 to length(ArrMiners)-1 do
       begin
       if ( (ArrMiners[counter].Shares>0) or (ArrMiners[counter].Balance>0) or((ArrMiners[counter].LastPay+36)<GetMAinConsensus.block) ) then
@@ -466,11 +471,10 @@ rewrite(MinersFile);
    EXCEPT ON E:EXCEPTION do
       begin
       ToLog('.CRITICAL: Error saving miners file. '+E.Message);
-      Errored := true;
       end;
    END {TRY};
 FINALLY
-CloseFile(MinersFile);
+if FileIsOpen then CloseFile(MinersFile);
 LeaveCriticalSection(CS_Miners);
 LoadMiners;
 END {TRY};
@@ -519,7 +523,7 @@ write(ThisFile,DefaultNodes);
 CloseFile(ThisFile);
 EXCEPT ON E:EXCEPTION do
    begin
-   writeln('Error creating nodes file');
+   ToLog(' Error creating nodes file');
    Halt(1);
    end;
 END {TRY};
@@ -547,21 +551,23 @@ End;
 function SaveMnsToDisk(lineText:string): boolean;
 var
   ThisFile : TextFile;
+  Fiop     : boolean = false;
 Begin
 Result := true;
 if LineText = '' then exit;
 AssignFile(ThisFile,'nodes.txt');
 TRY
-rewrite(ThisFile);
    TRY
+   rewrite(ThisFile);
+   Fiop := true;
    write(ThisFile,lineText);
    EXCEPT ON E:EXCEPTION do
       begin
-      ToLog('Error saving MNs to file: '+E.Message);
+      ToLog(' Error saving MNs to file: '+E.Message);
       end;
    END {TRY};
 FINALLY
-CloseFile(ThisFile);
+if Fiop then CloseFile(ThisFile);
 END {TRY};
 End;
 
@@ -870,6 +876,7 @@ Begin
 result := true;
 TRY
 rewrite(configfile);
+writeln(configfile,'poolname '+PoolName);
 writeln(configfile,'pooladdress '+PoolAddress);
 writeln(configfile,'publickey '+PublicKey);
 writeln(configfile,'privatekey '+PrivateKey);
@@ -906,6 +913,7 @@ TRY
 while not eof(configfile) do
    begin
    readln(configfile,linea);
+   if uppercase(Parameter(linea,0)) = 'POOLNAME' then PoolName := Parameter(linea,1);
    if uppercase(Parameter(linea,0)) = 'POOLPORT' then PoolPort := StrToIntDef(Parameter(linea,1),Poolport);
    if uppercase(Parameter(linea,0)) = 'DIFFBASE' then MinDiffBase := Parameter(linea,1);
    if uppercase(Parameter(linea,0)) = 'POOLFEE' then PoolFee := StrToIntDef(Parameter(linea,1),PoolFee);
@@ -1637,24 +1645,22 @@ TCPClient := TidTCPClient.Create(nil);
 TCPclient.ConnectTimeout:= 3000;
 TCPclient.ReadTimeout:=3000;
 REPEAT
-Node := Node+1; If Node >= LengthNodes then Node := 0;
-TCPclient.Host:=GetNodeIndex(Node).host;
-TCPclient.Port:=GetNodeIndex(Node).port;
-Success := false;
-Trys :=+1;
-TRY
-TCPclient.Connect;
-TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+PoolAddress+' '+GetSolution.Hash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
-
-
-Resultado := TCPclient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
-TCPclient.Disconnect();
-Success := true;
-EXCEPT on E:Exception do
-   begin
+   Node := Node+1; If Node >= LengthNodes then Node := 0;
+   TCPclient.Host:=GetNodeIndex(Node).host;
+   TCPclient.Port:=GetNodeIndex(Node).port;
    Success := false;
-   end;
-END{try};
+   TRY
+   TCPclient.Connect;
+   TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+PoolAddress+' '+GetSolution.Hash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
+   Resultado := TCPclient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
+   TCPclient.Disconnect();
+   Success := true;
+   EXCEPT on E:Exception do
+      begin
+      Success := false;
+      end;
+   END{try};
+   Inc(Trys);
 UNTIL ((Success) or (Trys = 5));
 TCPClient.Free;
 If success then
@@ -2140,8 +2146,27 @@ else
    end;
 End;
 
+// Debug
 
+Procedure RunTest();
+var
+  LFile : TextFile;
+  Fiop  : boolean = false;
+Begin
+Assignfile(LFile,'test.dat');
+TRY
+   TRY
+   Reset(LFile);
+   Fiop := true;
+   {do stuff with file}
+   EXCEPT ON E:Exception do
+      ToLog(' Test Error');
+   END;
+FINALLY
+if Fiop then CloseFile(LFile);
+END;
 
+End;
 
 END. // End unit
 
