@@ -400,9 +400,6 @@ if not directoryexists('miners') then createdir('miners');
 if not directoryexists('blocks') then createdir('blocks');
 if not directoryexists('addresses') then createdir('addresses');
 AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
-//*****
-//AssignFile(TempMinersFile ,'miners'+DirectorySeparator+'miners2.dat');
-//*****
 Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
@@ -481,11 +478,18 @@ REPEAT
       if ( (MainConsensus.LBTimeEnd >= 300) and (not ThisBlockMNs) ) then
          begin
          MNsTextDown := GetMNsFromNode;
-         if MNsTextDown <> '' then
+         if Copy(HashMD5String(MNsTextDown+#13#10),0,5) = GetMainConsensus.MNsHash then
             begin
-            SaveMnsToDisk(MNsTextDown);
-            LoadNodes(GetNodesFileData());
-            ToLog(Format(' Nodes updated: %d Verificators',[length(NodesArray)]));
+            if SaveMnsToDisk(MNsTextDown) then
+               begin
+               LoadNodes(GetNodesFileData());
+               ToLog(Format(' Nodes updated: %d Verificators',[length(NodesArray)]));
+               ThisBlockMNs := true;
+               end;
+            end
+         else
+            begin
+            ToLog(Format(' Wrong MNs Hash: %s <> %s',[Copy(HashMD5String(MNsTextDown),0,5),GetMainConsensus.MNsHash]));
             ThisBlockMNs := true;
             end;
          end;
@@ -646,5 +650,6 @@ if RestartAfterQuit then
       end;
    RunExternalProgram(FileToRestart);
    end;
+Sleep(1000);
 END.
 

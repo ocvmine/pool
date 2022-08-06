@@ -157,6 +157,7 @@ TCPClient.Free;
 if sucess then
    begin
    ThisNode.block    :=StrToIntDef(Parameter(LineText,2),ThisNode.block);
+   ThisNode.MNsHash  :=Parameter(LineText,8);
    ThisNode.LBHash   :=Parameter(LineText,10);
    ThisNode.NMSDiff  :=Parameter(LineText,11);
    ThisNode.LBTimeEnd:=StrToInt64Def(Parameter(LineText,12),0);
@@ -402,6 +403,18 @@ If ContactedNodes>=(LengthNodes div 2) then
          ResNode.LBSolDiff := GetHighest;
          end;
       End;
+
+   // Get the consensus MNs Hash
+   SetLength(ArrT,0);
+   For counter := 0 to LengthNodes-1 do
+      Begin
+      if GetNodeIndex(counter).block>0 then
+         begin
+         AddValue(GetNodeIndex(counter).MNsHash);
+         ResNode.MNsHash := GetHighest;
+         end;
+      End;
+
    {More fields to get update}
 
    if ResNode.block>GetMainConsensus.block then
@@ -1095,10 +1108,10 @@ var
   WasDone : boolean = false;
 Begin
 Result := '';
+Client := TidTCPClient.Create(nil);
 REPEAT
    RanNode := Random(LengthNodes);
    ThisNode := GetNodeIndex(RanNode);
-   Client := TidTCPClient.Create(nil);
    Client.Host:=ThisNode.host;
    Client.Port:=ThisNode.port;
    Client.ConnectTimeout:= 3000;
@@ -1117,7 +1130,28 @@ Inc(Trys);
 UNTIL ( (WasDone) or (Trys = 5) );
 if client.Connected then Client.Disconnect();
 client.Free;
+
 End;
+
+{
+Procedure SaveNewNodes(TLine:String);
+var
+  ThisFile : TextFile;
+Begin
+result := '';
+AssignFile(ThisFile,'nodes.txt');
+TRY
+reset(ThisFile);
+Readln(ThisFile,result);
+PreviousNodes := Result;
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   result := previousNodes
+   end;
+END {TRY};
+End;
+}
 
 INITIALIZATION
 InitCriticalSection(CS_NodesArray);

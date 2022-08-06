@@ -62,7 +62,7 @@ Procedure CreateBlockzero();
 Procedure createPaymentsFile();
 Procedure createNodesFile();
 Function GetNodesFileData():String;
-Procedure SaveMnsToDisk(lineText:string);
+function SaveMnsToDisk(lineText:string): boolean;
 function GetMyLastUpdatedBlock():int64;
 Procedure LoadMiners();
 Function MinersCount():integer;
@@ -144,7 +144,7 @@ Procedure ClearWrongShareIp(ClearAll:boolean = true);
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.46';
+  AppVersion = 'v0.47';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -444,35 +444,36 @@ End;
 
 Procedure SaveMiners();
 var
-  Counter : integer;
+  Counter      : integer;
   AlreadyAdded : string = '';
-  //ThisTemp : TMinersData2;
+  Errored      : boolean = false;
 Begin
 EnterCriticalSection(CS_Miners);
 TRY
 rewrite(MinersFile);
-for counter := 0 to length(ArrMiners)-1 do
-   begin
-   if ( (ArrMiners[counter].Shares>0) or (ArrMiners[counter].Balance>0) or((ArrMiners[counter].LastPay+36)<GetMAinConsensus.block) ) then
+   TRY
+   for counter := 0 to length(ArrMiners)-1 do
       begin
-      if not AnsiContainsStr(AlreadyAdded,ArrMiners[counter].address) then
+      if ( (ArrMiners[counter].Shares>0) or (ArrMiners[counter].Balance>0) or((ArrMiners[counter].LastPay+36)<GetMAinConsensus.block) ) then
          begin
-         write(MinersFile,ArrMiners[counter]);
-         AlreadyAdded := AlreadyAdded+ArrMiners[counter].address+',';
+         if not AnsiContainsStr(AlreadyAdded,ArrMiners[counter].address) then
+            begin
+            write(MinersFile,ArrMiners[counter]);
+            AlreadyAdded := AlreadyAdded+ArrMiners[counter].address+',';
+            end;
          end;
       end;
-   end;
-//CloseFile(TempMinersFile);
+   EXCEPT ON E:EXCEPTION do
+      begin
+      ToLog('.CRITICAL: Error saving miners file. '+E.Message);
+      Errored := true;
+      end;
+   END {TRY};
+FINALLY
 CloseFile(MinersFile);
-EXCEPT ON E:EXCEPTION do
-   begin
-   writeln('Error saving miners file');
-   readln();
-   Halt(1);
-   end;
-END {TRY};
 LeaveCriticalSection(CS_Miners);
 LoadMiners;
+END {TRY};
 End;
 
 Procedure CreateBlockzero();
@@ -543,20 +544,24 @@ EXCEPT ON E:EXCEPTION do
 END {TRY};
 End;
 
-Procedure SaveMnsToDisk(lineText:string);
+function SaveMnsToDisk(lineText:string): boolean;
 var
   ThisFile : TextFile;
 Begin
+Result := true;
 if LineText = '' then exit;
 AssignFile(ThisFile,'nodes.txt');
 TRY
 rewrite(ThisFile);
-write(ThisFile,lineText);
+   TRY
+   write(ThisFile,lineText);
+   EXCEPT ON E:EXCEPTION do
+      begin
+      ToLog('Error saving MNs to file: '+E.Message);
+      end;
+   END {TRY};
+FINALLY
 CloseFile(ThisFile);
-EXCEPT ON E:EXCEPTION do
-   begin
-
-   end;
 END {TRY};
 End;
 
