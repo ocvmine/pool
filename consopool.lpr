@@ -475,7 +475,7 @@ REPEAT
          RefreshPoolBalance := false;
          PrintLine(3);
          end;
-      if ( (MainConsensus.LBTimeEnd >= 300) and (not ThisBlockMNs) ) then
+      if ( (MainConsensus.LBTimeEnd >= 300) and (MainConsensus.LBTimeEnd < 585)and (not ThisBlockMNs) ) then
          begin
          MNsTextDown := GetMNsFromNode;
          if Copy(HashMD5String(MNsTextDown+#13#10),0,5) = GetMainConsensus.MNsHash then

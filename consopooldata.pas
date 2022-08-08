@@ -148,7 +148,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.48';
+  AppVersion = 'v0.49';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -454,8 +454,8 @@ var
 Begin
 EnterCriticalSection(CS_Miners);
 TRY
+rewrite(MinersFile);
    TRY
-   rewrite(MinersFile);
    FileIsOpen := true;
    for counter := 0 to length(ArrMiners)-1 do
       begin
@@ -473,11 +473,14 @@ TRY
       ToLog('.CRITICAL: Error saving miners file. '+E.Message);
       end;
    END {TRY};
-FINALLY
-if FileIsOpen then CloseFile(MinersFile);
+CloseFile(MinersFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+    ToLog('.CRITICAL: Error accesing miners file. '+E.Message);
+   end;
+END {TRY};
 LeaveCriticalSection(CS_Miners);
 LoadMiners;
-END {TRY};
 End;
 
 Procedure CreateBlockzero();
@@ -557,17 +560,22 @@ Result := true;
 if LineText = '' then exit;
 AssignFile(ThisFile,'nodes.txt');
 TRY
+rewrite(ThisFile);
    TRY
-   rewrite(ThisFile);
    Fiop := true;
    write(ThisFile,lineText);
    EXCEPT ON E:EXCEPTION do
       begin
-      ToLog(' Error saving MNs to file: '+E.Message);
+      ToLog('.Error saving MNs to file: '+E.Message);
+      result := false;
       end;
    END {TRY};
-FINALLY
-if Fiop then CloseFile(ThisFile);
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   ToLog('.CRITICAL Saving MNs to disk: '+E.Message);
+   result := false;
+   end;
 END {TRY};
 End;
 
@@ -2153,6 +2161,7 @@ var
   LFile : TextFile;
   Fiop  : boolean = false;
 Begin
+{
 Assignfile(LFile,'test.dat');
 TRY
    TRY
@@ -2165,7 +2174,7 @@ TRY
 FINALLY
 if Fiop then CloseFile(LFile);
 END;
-
+}
 End;
 
 END. // End unit
