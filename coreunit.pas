@@ -716,7 +716,7 @@ End;
 // Returns the fee
 function GetFee(monto:int64):Int64;
 Begin
-Result := ((monto*10000) div 10001) div 10000;
+Result := monto div 10000;
 if result < 10 then result := 10;
 End;
 

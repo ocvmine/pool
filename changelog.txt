@@ -1,3 +1,9 @@
+Version 0.50
+
+- Get fee recalculated.
+- Miner device added to wrongshares.
+- File access rewrited.
+
 Version 0.48
 
 - Fixed bug on GetMainnetTimestamp multi client creation.

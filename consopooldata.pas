@@ -148,7 +148,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.49';
+  AppVersion = 'v0.50';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -1610,11 +1610,11 @@ else If UpperCase(Command) = 'SHARE' then
    //{1}Addess {2}Share {3}Miner
    begin
    ThisShare   := Parameter(Linea,2);
+   MinerDevice := Parameter(Linea,3);
    ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser);
    if ValidShareValue=0 then
       begin
       TryClosePoolConnection(AContext,'True');
-
       end
    else
       begin
