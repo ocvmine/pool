@@ -148,7 +148,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.50';
+  AppVersion = 'v0.51';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -1630,7 +1630,7 @@ else If UpperCase(Command) = 'POOLSTATUS' then
 }
 else If UpperCase(Command) = 'POOLINFO' then
    begin
-   TryClosePoolConnection(AContext,minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString);
+   TryClosePoolConnection(AContext,minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString+' '+MainNetHashRate.ToString);
    end
 else
    begin

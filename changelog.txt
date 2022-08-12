@@ -1,3 +1,7 @@
+Version 0.51
+
+- Mainnet hashrate added to poolinfo.
+
 Version 0.50
 
 - Get fee recalculated.
