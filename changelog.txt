@@ -1,3 +1,7 @@
+Version 0.52
+
+- New defnodes variable.
+
 Version 0.51
 
 - Mainnet hashrate added to poolinfo.
