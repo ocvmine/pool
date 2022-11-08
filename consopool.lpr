@@ -6,7 +6,7 @@ USES
   {$IFDEF UNIX}
    cthreads,
   {$ENDIF}
-  Classes, SysUtils, CRT, consopooldata, coreunit, NosoDig.Crypto
+  Classes, SysUtils, CRT, consopooldata, coreunit, NosoDig.Crypto, strutils
   { you can add units after this };
 
 Type
@@ -264,6 +264,29 @@ For counter := 0 to LengthNodes-1 do
    RawToConsole(Format('  %-18s %s %6s %d',[ThisNode.host, ThisNode.port.ToString, ThisNode.block.ToString, ThisNode.LBPoW]));
    end;
 
+End;
+
+Procedure LockAddress(LAddress:string);
+Begin
+if AnsiContainsStr(LockedAddressesString,LAddress) then
+   rawtoconsole(' Address already locked')
+else
+   begin
+   rawtoconsole('.Address locked: '+Laddress);
+   LockedAddressesString := LockedAddressesString+LAddress;
+   SaveConfig();
+   end;
+End;
+
+Procedure UnlockAddress(LAddress:string);
+Begin
+if AnsiContainsStr(LockedAddressesString,LAddress) then
+   begin
+   LockedAddressesString := StringReplace(LockedAddressesString,LAddress,'',[rfReplaceAll, rfIgnoreCase]);
+   rawtoconsole(',Address unlocked: '+LAddress);
+   SaveConfig();
+   end
+else rawtoconsole(' Address is not locked');
 End;
 
 Procedure ShowBlockShares();
@@ -593,6 +616,8 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(8,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(8,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
+      else if Uppercase(Parameter(Command,0)) = 'LOCK' then LockAddress(Parameter(Command,1))
+      else if Uppercase(Parameter(Command,0)) = 'UNLOCK' then UnlockAddress(Parameter(Command,1))
       else if Uppercase(Parameter(Command,0)) = 'RESTART' then
          begin
          FileToRestart := Parameter(Command,1);

@@ -1,3 +1,7 @@
+Version 0.53
+
+- Implemented lock addresses suport.
+
 Version 0.52
 
 - New defnodes variable.

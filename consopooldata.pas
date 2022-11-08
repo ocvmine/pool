@@ -100,6 +100,7 @@ Function GetBlockBest():String;
 Procedure SetBlockBest(ThisValue:String);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
+function IsLockedAddress(LAddress:String):boolean;
 Procedure GenerateReport(destination:integer);
 Procedure CounterReport(linea:String;Destination:integer);
 Procedure BuildNewBlock();
@@ -148,7 +149,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.52';
+  AppVersion = 'v0.53';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -228,6 +229,7 @@ VAR
   PrefixIndex: Integer = 0;
   MinerDiff  : String = '';
   IPMiners: integer = 100;
+  LockedAddressesString : string = '';
   ArrMiners : Array of TMinersData;
   ArrShares : Array of string;
   BlockTargetHash : String = '';
@@ -896,6 +898,7 @@ writeln(configfile,'ipminers '+IntToStr(IPMiners));
 writeln(configfile,'autostart '+BoolToStr(PoolAuto,True));
 writeln(configfile,'autodiff '+BoolToStr(AutoDiff,True));
 writeln(configfile,'autovalue '+IntToStr(AutoValue));
+writeln(configfile,'locked '+LockedAddressesString);
 
 CloseFile(configfile);
 EXCEPT ON E:EXCEPTION do
@@ -933,6 +936,7 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'AUTOSTART' then PoolAuto := StrToBool(Parameter(linea,1));
    if uppercase(Parameter(linea,0)) = 'AUTODIFF' then AutoDiff := StrToBool(Parameter(linea,1));
    if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then AutoValue := StrToIntDef(Parameter(linea,1),AutoValue);
+   if uppercase(Parameter(linea,0)) = 'LOCKED' then LockedAddressesString := Parameter(linea,1);
    end;
 EXCEPT ON E:EXCEPTION do
    begin
@@ -1143,6 +1147,12 @@ if (PerShare*TotalShares)+Earned <> BaseReward then
    ToLog(Format(' Error on distribution: %d',[BaseReward-(PerShare*TotalShares)]));
 End;
 
+function IsLockedAddress(LAddress:String):boolean;
+Begin
+Result := false;
+if AnsiContainsStr(LockedAddressesString,LAddress) then result := true;
+End;
+
 Procedure RunPayments();
 var
   ThisBlock       : integer;
@@ -1161,6 +1171,12 @@ For counter := 0 to length(CopyArray)-1 do
    begin
    if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+30<= ThisBlock)and(CopyArray[counter].address<>PoolAddress) )then
       begin
+      if IsLockedAddress(CopyArray[counter].address) then
+         begin
+         CopyArray[counter].LastPay := ThisBlock;
+         ToLog(Format(' BLOCKED payment of %s to Address %s : %s',[Int2Curr(CopyArray[counter].Balance),CopyArray[counter].address]));
+         continue;
+         end;
       PayingAddresses := PayingAddresses+1;
       TotalToPay := TotalToPay + CopyArray[counter].Balance;
       ThisThread := ThreadPayment.create(true,CopyArray[counter].address);
