@@ -150,7 +150,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.54';
+  AppVersion = 'v0.55';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -211,7 +211,7 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
-  MaxSharesPerBlock: integer = 5;
+  MaxSharesPerBlock: integer = 57;
 
   // Mainnet
   LastConsensusTry : int64   = 0;

@@ -1,3 +1,7 @@
+Version 0.55
+
+- Fixed PoPW.
+
 Version 0.54
 
 - Fixed bug on recent version.
