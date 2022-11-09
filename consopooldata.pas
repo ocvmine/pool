@@ -1572,6 +1572,7 @@ var
     MinTill: integer;
     MinPay : string;
   MinerDevice     : string = '';
+  IpShares : integer;
 Begin
 //*******************
 // IMPLEMENT TIME FILTER WITH BLOCKAGE
@@ -1602,11 +1603,6 @@ If UpperCase(Command) = 'SOURCE' then
       TryClosePoolConnection(AContext,'WRONG_ADDRESS');
       exit;
       end;
-   if EnoughSharesByIp(IPUser) then
-      begin
-      TryClosePoolConnection(AContext,'SHARES_LIMIT');
-      exit;
-      end;
    if CheckIPMiners(IPUser) then
       begin
       MinerData := GetMinerData(Address);
@@ -1633,6 +1629,11 @@ If UpperCase(Command) = 'SOURCE' then
 else If UpperCase(Command) = 'SHARE' then
    //{1}Addess {2}Share {3}Miner
    begin
+   if EnoughSharesByIp(IPUser) then
+      begin
+      TryClosePoolConnection(AContext,'SHARES_LIMIT');
+      exit;
+      end;
    ThisShare   := Parameter(Linea,2);
    MinerDevice := Parameter(Linea,3);
    ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser);
@@ -1999,19 +2000,19 @@ var
   counter : integer;
 Begin
 result := false;
-EnterCriticalSection(CS_UserIPArr);
-For counter := 0 to length(UserIPArr)-1 do
+EnterCriticalSection(CS_ShareIPArr);
+For counter := 0 to length(ShareIPArr)-1 do
    begin
-   if UserIPArr[counter].data=LIP then
+   if ShareIPArr[counter].data=LIP then
       begin
-      If UserIPArr[counter].inblock >= MaxSharesPerBlock then
+      If ShareIPArr[counter].inblock >= MaxSharesPerBlock then
          begin
          Result := true;
          break;
          end;
       end;
    end;
-LeaveCriticalSection(CS_UserIPArr);
+LeaveCriticalSection(CS_ShareIPArr);
 End;
 
 Procedure AddUserIP(userip:string);
