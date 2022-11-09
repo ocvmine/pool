@@ -289,6 +289,16 @@ if AnsiContainsStr(LockedAddressesString,LAddress) then
 else rawtoconsole(' Address is not locked');
 End;
 
+Procedure ClearAddress(LAddress:String);
+Begin
+if AnsiContainsStr(LockedAddressesString,LAddress) then
+   begin
+   ClearAddressBalance(LAddress,'Cleared');
+   rawtoconsole('.Address cleared: '+Laddress);
+   end
+else rawtoconsole(' Address is not locked. You need lock first an address before clear it.');
+End;
+
 Procedure ShowBlockShares();
 Var
   Counter : integer;
@@ -618,6 +628,7 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
       else if Uppercase(Parameter(Command,0)) = 'LOCK' then LockAddress(Parameter(Command,1))
       else if Uppercase(Parameter(Command,0)) = 'UNLOCK' then UnlockAddress(Parameter(Command,1))
+      else if Uppercase(Parameter(Command,0)) = 'CLEARADDRESS' then ClearAddress(Parameter(Command,1))
       else if Uppercase(Parameter(Command,0)) = 'RESTART' then
          begin
          FileToRestart := Parameter(Command,1);

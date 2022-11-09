@@ -1,3 +1,10 @@
+Version 0.54
+
+- Fixed bug on recent version.
+- PoP&W implemented.
+- Diffbase hardcoded.
+- ClearAddress implemented.
+
 Version 0.53
 
 - Implemented lock addresses suport.

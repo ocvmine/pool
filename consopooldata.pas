@@ -134,6 +134,7 @@ Procedure GetBlocksMinedByPool();
 // Debug Counters
 Procedure AddUserMiner(Minerv:String);
 Procedure ClearUserMinerArray(ClearAll:boolean = true);
+Function EnoughSharesByIp(LIP:String):Boolean;
 Procedure AddUserIP(userip:string);
 Procedure ClearUserIPArray(ClearAll:boolean = true);
 Procedure AddShareIP(userip:string);
@@ -149,7 +150,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.53';
+  AppVersion = 'v0.54';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -210,6 +211,8 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
+  MaxSharesPerBlock: integer = 5;
+
   // Mainnet
   LastConsensusTry : int64   = 0;
   WaitingConsensus :Boolean = false;
@@ -926,7 +929,7 @@ while not eof(configfile) do
    readln(configfile,linea);
    if uppercase(Parameter(linea,0)) = 'POOLNAME' then PoolName := Parameter(linea,1);
    if uppercase(Parameter(linea,0)) = 'POOLPORT' then PoolPort := StrToIntDef(Parameter(linea,1),Poolport);
-   if uppercase(Parameter(linea,0)) = 'DIFFBASE' then MinDiffBase := Parameter(linea,1);
+   if uppercase(Parameter(linea,0)) = 'DIFFBASE' then MinDiffBase := '00000';{Parameter(linea,1);}
    if uppercase(Parameter(linea,0)) = 'POOLFEE' then PoolFee := StrToIntDef(Parameter(linea,1),PoolFee);
    if uppercase(Parameter(linea,0)) = 'POOLPAY' then PoolPay := StrToIntDef(Parameter(linea,1),PoolPay);
    if uppercase(Parameter(linea,0)) = 'POOLADDRESS' then PoolAddress := Parameter(linea,1);
@@ -1174,7 +1177,7 @@ For counter := 0 to length(CopyArray)-1 do
       if IsLockedAddress(CopyArray[counter].address) then
          begin
          CopyArray[counter].LastPay := ThisBlock;
-         ToLog(Format(' BLOCKED payment of %s to Address %s : %s',[Int2Curr(CopyArray[counter].Balance),CopyArray[counter].address]));
+         ToLog(Format('.BLOCKED payment of %s to Address : %s',[Int2Curr(CopyArray[counter].Balance),CopyArray[counter].address]));
          continue;
          end;
       PayingAddresses := PayingAddresses+1;
@@ -1599,6 +1602,11 @@ If UpperCase(Command) = 'SOURCE' then
       TryClosePoolConnection(AContext,'WRONG_ADDRESS');
       exit;
       end;
+   if EnoughSharesByIp(IPUser) then
+      begin
+      TryClosePoolConnection(AContext,'SHARES_LIMIT');
+      exit;
+      end;
    if CheckIPMiners(IPUser) then
       begin
       MinerData := GetMinerData(Address);
@@ -1984,6 +1992,26 @@ else
       USerMiner[counter].inblock:=0;
    LeaveCriticalSection(CS_USerMiner);
    end;
+End;
+
+Function EnoughSharesByIp(LIP:String):Boolean;
+var
+  counter : integer;
+Begin
+result := false;
+EnterCriticalSection(CS_UserIPArr);
+For counter := 0 to length(UserIPArr)-1 do
+   begin
+   if UserIPArr[counter].data=LIP then
+      begin
+      If UserIPArr[counter].inblock >= MaxSharesPerBlock then
+         begin
+         Result := true;
+         break;
+         end;
+      end;
+   end;
+LeaveCriticalSection(CS_UserIPArr);
 End;
 
 Procedure AddUserIP(userip:string);
