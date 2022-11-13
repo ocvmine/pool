@@ -88,6 +88,7 @@ Function UpdateScreen():Boolean;
 Procedure SetUpdateScreen();
 Procedure InitServer();
 function CheckIPMiners(UserIP:String):Boolean;
+Function GetIpFiltered(LIP:String):String;
 Function TryMessageToMiner(AContext: TIdContext;message:string):boolean;
 Procedure TryClosePoolConnection(AContext: TIdContext; closemsg:string='');
 Function StartPool():String;
@@ -97,7 +98,8 @@ Function GetDiffHashrate(bestdiff:String):integer;
 Function GetSessionSpeed(): int64;
 Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
 Function GetBlockBest():String;
-Procedure SetBlockBest(ThisValue:String);
+Function GetBlockBestAddress():String;
+Procedure SetBlockBest(ThisValue:String; Laddress: string);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
 function IsLockedAddress(LAddress:String):boolean;
@@ -134,6 +136,7 @@ Procedure GetBlocksMinedByPool();
 // Debug Counters
 Procedure AddUserMiner(Minerv:String);
 Procedure ClearUserMinerArray(ClearAll:boolean = true);
+Function IPsCOunt():Integer;
 Function EnoughSharesByIp(LIP:String):Boolean;
 Procedure AddUserIP(userip:string);
 Procedure ClearUserIPArray(ClearAll:boolean = true);
@@ -150,7 +153,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.55';
+  AppVersion = 'v0.57';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -237,6 +240,7 @@ VAR
   ArrShares : Array of string;
   BlockTargetHash : String = '';
   ThisBlockBest   : String = DefWorst;
+  ThisBlockBestAddress : string = '';
   Solution        : String = '';
   BlockPrefixesRequested : integer = 0;
   BestPoolSolution: TSolution;
@@ -814,14 +818,14 @@ else
          ThisSolution.address:=Address;
          ThisSolution.Diff:=ThisDiff;
          SetSolution(ThisSolution);
-         SetBlockBest(ThisDiff);
+         SetBlockBest(ThisDiff, Address );
          end;
       if ThisDiff<GetBlockBEst then
          begin
          ThisSolution.Hash:=Share;
          ThisSolution.address:=Address;
          ThisSolution.Diff:=ThisDiff;
-         SetBlockBest(ThisDiff)
+         SetBlockBest(ThisDiff, Address)
          end;
       end
    else
@@ -1109,10 +1113,18 @@ Result := ThisBlockBest;
 LeaveCriticalSection(CS_BlockBest);
 End;
 
-Procedure SetBlockBest(ThisValue:String);
+Function GetBlockBestAddress():String;
+Begin
+EnterCriticalSection(CS_BlockBest);
+Result := ThisBlockBestAddress;
+LeaveCriticalSection(CS_BlockBest);
+End;
+
+Procedure SetBlockBest(ThisValue:String; Laddress: string);
 Begin
 EnterCriticalSection(CS_BlockBest);
 ThisBlockBest := ThisValue;
+ThisBlockBestAddress := LAddress;
 LeaveCriticalSection(CS_BlockBest);
 End;
 
@@ -1172,7 +1184,7 @@ CopyArray := copy(ArrMiners,0,length(ArrMiners));
 LeaveCriticalSection(CS_Miners);
 For counter := 0 to length(CopyArray)-1 do
    begin
-   if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+30<= ThisBlock)and(CopyArray[counter].address<>PoolAddress) )then
+   if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address<>PoolAddress) )then
       begin
       if IsLockedAddress(CopyArray[counter].address) then
          begin
@@ -1186,7 +1198,7 @@ For counter := 0 to length(CopyArray)-1 do
       ThisThread.FreeOnTerminate:=true;
       ThisThread.Start;
       end;
-   if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+30<= ThisBlock)and(CopyArray[counter].address=PoolAddress) )then
+   if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address=PoolAddress) )then
       begin
       // Same address than pool address, do not send to save fees.
       ClearAddressBalance(CopyArray[counter].address,ThisBlock.ToString+':'+CopyArray[counter].Balance.ToString+':'+'OwnPayment');
@@ -1278,7 +1290,7 @@ else if Destination = uToConsole then
       AddText   := format('%0:-35s',[FinalArray[counter2].address]);
       BalanText := Format('%0:12s',[Int2Curr(FinalArray[counter2].balance)]);
       sharestext:= Format('%0:6s',[FinalArray[counter2].Shares.ToString]);
-      ToPayText := Format('%0:6d',[FinalArray[counter2].LastPay+30-GetMainConsensus.block]);
+      ToPayText := Format('%0:6d',[FinalArray[counter2].LastPay+poolpay-GetMainConsensus.block]);
       ToLog(format(' %s | %s | %s | %s |',[AddText,BalanText,sharestext, ToPayText]),uToConsole);
       end;
    ToLog('/----------------------------------------------------------------------',uToConsole);
@@ -1426,6 +1438,7 @@ TRY
    SetLastBlockRate(BlockSpeed);
    WriteLn(Blockfile,format('Speed    : %d h/s',[BlockSpeed]));
    WriteLn(Blockfile,format('Best     : %s',[GetBlockBest]));
+   WriteLn(Blockfile,format('BestMiner: %s',[GetBlockBestAddress]));
    if GetMainConsensus.LBMiner = PoolAddress then
       begin
       Distribute := DistributeBlockPayment();
@@ -1450,19 +1463,23 @@ if AutoDiff then
    begin
    if TotalShares<AutoValue then
       begin
+      {
       Setlength(MinDiffBase,length(MinDiffBase)-1);
       MinerDiff := AddCharR('F',MinDiffBase,32);
       SaveConfig;
       RefreshPoolHeader := true;
       SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
+      }
       end;
    if TotalShares>AutoValue*16 then
       begin
+      {
       MinDiffBase := MinDiffBase+'0';
       MinerDiff := AddCharR('F',MinDiffBase,32);
       SaveConfig;
       RefreshPoolHeader := true;
       SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
+      }
       end;
    end;
 End;
@@ -1478,7 +1495,7 @@ EnterCriticalSection(CS_Shares);
 SetLength(ArrShares,0);
 LeaveCriticalSection(CS_Shares);
 ResetPrefixIndex();
-SetBlockBest(DefWorst);
+SetBlockBest(DefWorst,'');
 SetSolution(Default(TSolution));
 SESSION_Shares := 0;
 SESSION_Started := UTCTime;
@@ -1526,6 +1543,12 @@ End;
 function CheckIPMiners(UserIP:String):Boolean;
 Begin
 result := true;
+End;
+
+Function GetIpFiltered(LIP:String):String;
+Begin
+LIP :=  StringReplace(LIP,'.',' ',[rfReplaceAll, rfIgnoreCase]);
+Result := Format('%s.%s.%s',[parameter(LIP,0),parameter(LIP,1),parameter(LIP,2)]);
 End;
 
 // Try to send a message safely
@@ -1576,7 +1599,7 @@ var
 Begin
 //*******************
 // IMPLEMENT TIME FILTER WITH BLOCKAGE
-IPUser := AContext.Connection.Socket.Binding.PeerIP;
+IPUser := GetIpFiltered(AContext.Connection.Socket.Binding.PeerIP);
 Linea := '';
 TRY
 Linea := AContext.Connection.IOHandler.ReadLn('',3000,-1,IndyTextEncoding_UTF8);
@@ -1631,7 +1654,7 @@ else If UpperCase(Command) = 'SHARE' then
    begin
    if EnoughSharesByIp(IPUser) then
       begin
-      TryClosePoolConnection(AContext,'SHARES_LIMIT');
+      TryClosePoolConnection(AContext,'False SHARES_LIMIT');
       exit;
       end;
    ThisShare   := Parameter(Linea,2);
@@ -1657,6 +1680,8 @@ else If UpperCase(Command) = 'POOLINFO' then
    begin
    TryClosePoolConnection(AContext,minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString+' '+MainNetHashRate.ToString);
    end
+else If UpperCase(Command) = 'POOLPUBLIC' then
+    TryClosePoolConnection(AContext,AppVersion+' '+IPsCount.ToString+' '+MaxSharesPerBlock.ToString)
 else
    begin
    TryClosePoolConnection(AContext,'Unknown :'+Linea);
@@ -1702,7 +1727,6 @@ If success then
    ErrorCode := Parameter(Resultado,2);
    Mainnetbest := Parameter(Resultado,1);
    MainBestDiff := Mainnetbest;
-
    if WasGood then
       begin
       ToLog(',Besthash submited: '+BestHashReadeable(Data.Diff),uToFile);
@@ -1993,6 +2017,13 @@ else
       USerMiner[counter].inblock:=0;
    LeaveCriticalSection(CS_USerMiner);
    end;
+End;
+
+Function IPsCOunt():Integer;
+Begin
+EnterCriticalSection(CS_ShareIPArr);
+result :=  length(ShareIPArr);
+LeaveCriticalSection(CS_ShareIPArr);
 End;
 
 Function EnoughSharesByIp(LIP:String):Boolean;

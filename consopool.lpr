@@ -310,10 +310,9 @@ For counter := 0 to Length(ArrMiners)-1 do
    begin
    ThisMiner := ArrMiners[Counter];
    RawToConsole(Format(' %0:-40s %12s %5s %d',[ThisMiner.address,Int2Curr(ThisMiner.Balance),
-                         ThisMiner.Shares.ToString,ThisMiner.LastPay+30-MainConsensus.block]));
+                         ThisMiner.Shares.ToString,ThisMiner.LastPay+poolpay-MainConsensus.block]));
    end;
 LeaveCriticalSection(CS_Miners);
-
 End;
 
 Procedure PrintUpdateScreen();
@@ -629,6 +628,13 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'LOCK' then LockAddress(Parameter(Command,1))
       else if Uppercase(Parameter(Command,0)) = 'UNLOCK' then UnlockAddress(Parameter(Command,1))
       else if Uppercase(Parameter(Command,0)) = 'CLEARADDRESS' then ClearAddress(Parameter(Command,1))
+      else if Uppercase(Parameter(Command,0)) = 'STATUS' then
+         begin
+         RawToConsole(',Status');
+         RawToConsole(' Best miner   : '+GetBlockBestAddress);
+         RawToConsole(' Best hash    : '+GetBlockBest);
+         RawToConsole(' Mainnet best : '+MainBestDiff);
+         end
       else if Uppercase(Parameter(Command,0)) = 'RESTART' then
          begin
          FileToRestart := Parameter(Command,1);

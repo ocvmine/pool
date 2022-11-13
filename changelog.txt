@@ -1,3 +1,14 @@
+Version 0.57
+
+- Added filtered IPs.
+- Added pool public info.
+
+Version 0.56
+
+- Fixed pay interval bug.
+- Added false confirmation when SHARES_LIMIT is reached.
+- Added besthash miner to report.
+
 Version 0.55
 
 - Fixed PoPW.
