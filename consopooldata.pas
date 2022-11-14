@@ -153,7 +153,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.57';
+  AppVersion = 'v0.58';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
 
@@ -804,7 +804,7 @@ else
    begin
    ThisHash := NosoHash(Share+PoolAddress);
    ThisDiff := GetHashDiff(GetMainConsensus.LBHash,ThisHash);
-   if ThisDiff < MinerDiff then // Valid share
+   if ( (ThisDiff < MinerDiff) and (Copy(ThisDiff,1,7)<>'0000000') ) then // Valid share
       begin
       Result := 0;
       AddShare(Share+Address);
@@ -1681,7 +1681,7 @@ else If UpperCase(Command) = 'POOLINFO' then
    TryClosePoolConnection(AContext,minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString+' '+MainNetHashRate.ToString);
    end
 else If UpperCase(Command) = 'POOLPUBLIC' then
-    TryClosePoolConnection(AContext,AppVersion+' '+IPsCount.ToString+' '+MaxSharesPerBlock.ToString)
+    TryClosePoolConnection(AContext,AppVersion+' '+IPsCount.ToString+' '+MaxSharesPerBlock.ToString+' '+PoolPay.ToString+' '+IPUser)
 else
    begin
    TryClosePoolConnection(AContext,'Unknown :'+Linea);

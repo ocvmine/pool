@@ -1,3 +1,8 @@
+Version 0.58
+
+- Top share implemented.
+- Adjust to remote info.
+
 Version 0.57
 
 - Added filtered IPs.
