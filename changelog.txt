@@ -1,3 +1,10 @@
+Version 0.59
+
+- Support for PoPW miners requests.
+- Sumary support implemented.
+- Support for miners donations.
+- Option to pool owner donations.
+
 Version 0.58
 
 - Top share implemented.

@@ -33,7 +33,7 @@ GotoXY(1,number);ClrEOL;
 if number = 1 then
    begin
    Textcolor(Blue);TextBackground(White);
-   Write(Format(' Noso pool Nosohash %s [FPC=%s] ',[AppVersion,fpcVersion]));
+   Write(Format(' Noso PoPW pool - Nosohash %s [FPC=%s] Donate: %d%% ',[AppVersion,fpcVersion,PoolDonate]));
    end;
 IF ((number > 1) and (not OnMainScreen)) then exit;
 if number = 2 then
@@ -377,6 +377,7 @@ if mensaje<>'' then
    end;
 writeLn('ConsoPool Properly CLosed');
 saveminers;
+SaveConfig();
 Poolserver.Active:=false;
 PoolServer.Free;
 DoneCriticalSection(CS_UpdateScreen);
@@ -395,6 +396,8 @@ DoneCriticalSection(CS_UserIPArr);
 DoneCriticalSection(CS_ShareIPArr);
 DoneCriticalSection(CS_WrongShareMiner);
 DoneCriticalSection(CS_WrongShareIp);
+DoneCriticalSection(CS_ArraySumary);
+
 End;
 
 BEGIN
@@ -414,7 +417,7 @@ InitCriticalSection(CS_UserIPArr);
 InitCriticalSection(CS_ShareIPArr);
 InitCriticalSection(CS_WrongShareMiner);
 InitCriticalSection(CS_WrongShareIp);
-
+InitCriticalSection(CS_ArraySumary);
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
@@ -425,6 +428,8 @@ SetLength(UserMiner,0);
 SetLength(UserIpArr,0);
 SetLength(WrongShareMiner,0);
 SetLength(WrongShareIp,0);
+SetLength(ARRAY_Sumary,0);
+
 
 ClrScr;
 if not directoryexists('logs') then createdir('logs');

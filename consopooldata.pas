@@ -6,9 +6,17 @@ INTERFACE
 
 USES
   Classes, SysUtils, coreunit, IdTCPServer, IdContext, IdGlobal, StrUtils,
-  IdTCPClient, math, fileutil, nosodig.crypto;
+  IdTCPClient, math, fileutil, nosodig.crypto, Zipper;
 
 Type
+
+  SumaryData = Packed Record
+    Hash    : String[40];
+    Custom  : String[40];
+    Balance : int64;
+    Score   : int64;
+    LastOP  : int64;
+    end;
 
   ThreadPayment = class(TThread)
    private
@@ -67,6 +75,7 @@ function GetMyLastUpdatedBlock():int64;
 Procedure LoadMiners();
 Function MinersCount():integer;
 Function GetMinerBalance(address:string):int64;
+Function GetAddressNosoBalance(LAddress:String):Int64;
 Function GetMinerData(address:string):string;
 Procedure ClearAddressBalance(Address, LastPayInfo:string);
 Function GetTotalDebt():Int64;
@@ -75,7 +84,7 @@ Procedure AddShare(Share:string);
 Function SharesCount():Integer;
 Function ShareAlreadyExists(Share:string):boolean;
 Procedure CreditShare(Address,IPUser:String);
-Function ShareIsValid(Share,Address,MinerProgram,IPUser:String):integer;
+Function ShareIsValid(Share,Address,MinerProgram,IPUser:String; CreditAddress:STring):integer;
 
 Procedure SetSolution(Data:TSolution);
 Function GetSolution():TSolution;
@@ -100,6 +109,7 @@ Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
 Function GetBlockBest():String;
 Function GetBlockBestAddress():String;
 Procedure SetBlockBest(ThisValue:String; Laddress: string);
+Procedure CreditDonationToDeveloper(Amount:int64);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
 function IsLockedAddress(LAddress:String):boolean;
@@ -153,9 +163,12 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.58';
+  AppVersion = 'v0.59';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+  ZipSumaryFilename = 'sumary.zip';
+  SumaryFilename    = 'data'+directoryseparator+'sumary.psk';
+  DeveloperAddress  = 'N3weyyb4HYw4KF3tXWkLbSbMcXzAZFH';
 
   // Predefined Types for OutPut
   uToBoth      = 0;
@@ -176,6 +189,9 @@ VAR
   // Files
   configfile, LogFile, OldLogFile, PaysFile : TextFile;
   MinersFile : File of TMinersData;
+  // Sumary
+  ARRAY_Sumary : Array of SumaryData;
+  FILE_Sumary  : file of SumaryData;
   //TempMinersFile : File of TMinersData2;
   // Config values
   PoolName     : string[15] = 'mypool';
@@ -189,6 +205,7 @@ VAR
   PoolAuto     : boolean = true;
   AutoDiff     : boolean = true;
   AutoValue    : integer = 500;
+  PoolDonate   : integer = 5;
   // Operative
   previousNodes: string;
   ThisBlockMNs : boolean = false;
@@ -265,6 +282,7 @@ VAR
   CS_ShareIPArr      : TRTLCriticalSection;
   CS_WrongShareMiner : TRTLCriticalSection;
   CS_WrongShareIp    : TRTLCriticalSection;
+  CS_ArraySumary     : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -406,6 +424,114 @@ Inc(Trys);
 UNTIL ( (WasDone) or (Trys=3) );
 if client.Connected then Client.Disconnect();
 client.Free;
+End;
+
+function GetSumary():boolean;
+var
+  TCPClient      : TidTCPClient;
+  MyStream       : TMemoryStream;
+  DownloadedFile : Boolean = false;
+  HashLine       : string;
+  RanNode        : integer;
+  ThisNode       : TNodeData;
+Begin
+Result         := false;
+RanNode := Random(LengthNodes);
+ThisNode := GetNodeIndex(RanNode);
+TCPClient := TidTCPClient.Create(nil);
+TCPClient.Host:=ThisNode.host;
+TCPClient.Port:=ThisNode.port;
+TCPClient.ConnectTimeout:= 3000;
+TCPClient.ReadTimeout:=3000;
+MyStream       := TMemoryStream.Create;
+TRY
+TCPClient.Connect;
+TCPClient.IOHandler.WriteLn('GETZIPSUMARY');
+   TRY
+   HashLine := TCPClient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
+   TCPClient.IOHandler.ReadStream(MyStream);
+   result := true;
+   MyStream.SaveToFile(ZipSumaryFilename);
+   ToLog(' Sumary downloaded');
+   EXCEPT on E:Exception do
+      begin
+      ToLog('Error downloading sumary: '+E.Message);
+      end;
+   END{Try};
+EXCEPT on E:Exception do
+   begin
+
+   end;
+END{try};
+if TCPClient.Connected then TCPClient.Disconnect();
+TCPClient.Free;
+MyStream.Free;
+End;
+
+// Unzip the received sumary file
+Procedure UnZipSumary();
+var
+  UnZipper: TUnZipper;
+Begin
+TRY
+UnZipper := TUnZipper.Create;
+   TRY
+   UnZipper.FileName := ZipSumaryFilename;
+   UnZipper.OutputPath := '';
+   UnZipper.Examine;
+   UnZipper.UnZipAllFiles;
+   FINALLY
+   UnZipper.Free;
+   END;
+EXCEPT on E:Exception do
+   begin
+   tolog (' Error unzipping sumary file');
+   end;
+END{Try};
+End;
+
+// Loads a sumary to memory
+Procedure LoadSumary();
+var
+  Counter : integer = 0;
+Begin
+EnterCriticalSection(CS_ArraySumary);
+TRY
+SetLength(ARRAY_Sumary,0);
+assignfile(FILE_Sumary,SumaryFilename);
+Reset(FILE_Sumary);
+SetLength(ARRAY_Sumary,fileSize(FILE_Sumary));
+for Counter := 0 to Filesize(FILE_Sumary)-1 do
+   Begin
+   seek(FILE_Sumary,Counter);
+   read(FILE_Sumary,ARRAY_Sumary[Counter]);
+   end;
+CloseFile(FILE_Sumary);
+ToLog(' Sumary loaded');
+EXCEPT on E:Exception do
+   begin
+   ToLog(' Error loading sumary: '+E.Message);
+   end
+END{Try};
+LEaveCriticalSection(CS_ArraySumary);
+End;
+
+// Return the summary balance for the specified address
+function GetAddressBalanceFromSumary(address:string):int64;
+var
+  cont : integer;
+Begin
+Result := 0;
+EnterCriticalSection(CS_ArraySumary);
+for cont := 0 to length(ARRAY_Sumary)-1 do
+   begin
+   if ((address = ARRAY_Sumary[cont].Hash) or (address = ARRAY_Sumary[cont].Custom)) then
+      begin
+      result := ARRAY_Sumary[cont].Balance;
+      break;
+      end;
+   end;
+LEaveCriticalSection(CS_ArraySumary);
 End;
 
 function GetAddressBalance(Address:String):int64;
@@ -652,6 +778,12 @@ for counter := 0 to length(ArrMiners)-1 do
 LeaveCriticalSection(CS_Miners);
 End;
 
+Function GetAddressNosoBalance(LAddress:String):Int64;
+Begin
+Result := 0;
+Result := GetAddressBalance(LAddress);
+End;
+
 Function GetMinerData(address:string):string;
 var
   counter    : integer;
@@ -778,7 +910,7 @@ Result := BestPoolSolution;
 LeaveCriticalSection(CS_Solution);
 End;
 
-Function ShareIsValid(Share,Address,MinerProgram,IPUser:String):integer;
+Function ShareIsValid(Share,Address,MinerProgram,IPUser:String; CreditAddress:STring):integer;
 var
   ThisHash, ThisDiff : string;
   ThisSolution : TSolution;
@@ -808,7 +940,7 @@ else
       begin
       Result := 0;
       AddShare(Share+Address);
-      CreditShare(Address,IPUser);
+      CreditShare(CreditAddress,IPUser);
       If StoreShares then CreditFrequency(ThisDiff);
       Inc(SESSION_Shares);
       //UpdateServerInfo := true;
@@ -906,6 +1038,7 @@ writeln(configfile,'autostart '+BoolToStr(PoolAuto,True));
 writeln(configfile,'autodiff '+BoolToStr(AutoDiff,True));
 writeln(configfile,'autovalue '+IntToStr(AutoValue));
 writeln(configfile,'locked '+LockedAddressesString);
+writeln(configfile,'donate '+PoolDonate.ToString);
 
 CloseFile(configfile);
 EXCEPT ON E:EXCEPTION do
@@ -944,6 +1077,8 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'AUTODIFF' then AutoDiff := StrToBool(Parameter(linea,1));
    if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then AutoValue := StrToIntDef(Parameter(linea,1),AutoValue);
    if uppercase(Parameter(linea,0)) = 'LOCKED' then LockedAddressesString := Parameter(linea,1);
+   if uppercase(Parameter(linea,0)) = 'DONATE' then PoolDonate := StrToIntDef(Parameter(linea,1),PoolDonate);
+   if PoolDonate>99 then PoolDonate := 99;
    end;
 EXCEPT ON E:EXCEPTION do
    begin
@@ -1128,6 +1263,35 @@ ThisBlockBestAddress := LAddress;
 LeaveCriticalSection(CS_BlockBest);
 End;
 
+Procedure CreditDonationToDeveloper(Amount:int64);
+var
+  Counter  : integer;
+  Found    : boolean = false;
+  NewMiner : TMinersData;
+Begin
+EnterCriticalSection(CS_Miners);
+For counter := 0 to length(ArrMiners)-1 do
+   begin
+   if ArrMiners[counter].address =DeveloperAddress then
+      begin
+      ArrMiners[counter].Balance:=ArrMiners[counter].Balance+Amount;
+      Found := true;
+      Break;
+      end;
+   end;
+If not found then
+   begin
+   NewMiner := Default(TMinersData);
+   NewMiner.address:=DeveloperAddress;
+   NewMiner.Shares:=0;
+   NewMiner.Balance:=Amount;
+   NewMiner.LastPay:=GetMainConsensus.block;
+   Insert(NewMiner,ArrMiners,Length(ArrMiners));
+   end;
+LEaveCriticalSection(CS_Miners);
+ToLog(' Donated to dev: '+Int2curr(amount));
+End;
+
 Function DistributeBlockPayment():string;
 var
   counter      : integer;
@@ -1157,6 +1321,10 @@ For counter := 0 to length(ArrMiners)-1 do
    end;
 LeaveCriticalSection(CS_Miners);
 Earned := GetMainConsensus.LBPoW-(PerShare*TotalShares);
+if PoolDonate>0 then
+   begin
+   CreditDonationToDeveloper((Earned*PoolDonate) div 100);
+   end;
 Result := PerShare.ToString+' '+Earned.ToString;
 if (PerShare*TotalShares)+Earned <> BaseReward then
    ToLog(Format(' Error on distribution: %d',[BaseReward-(PerShare*TotalShares)]));
@@ -1506,6 +1674,9 @@ ClearUserIPArray(False);
 ClearShareIPArray(False);
 ClearWrongShareMiner(False);
 ClearWrongShareIP(False);
+GetSumary;
+UnZipSumary();
+LoadSumary;
 End;
 
 Function GetPrefixIndex():Integer;
@@ -1595,7 +1766,8 @@ var
     MinTill: integer;
     MinPay : string;
   MinerDevice     : string = '';
-  IpShares : integer;
+  IpShares        : integer;
+  CreditAddress   : string;
 Begin
 //*******************
 // IMPLEMENT TIME FILTER WITH BLOCKAGE
@@ -1646,7 +1818,10 @@ If UpperCase(Command) = 'SOURCE' then
                                             {9}GetLastBlockRate.ToString+' '+
                                             {10}MainnetHashRate.ToString+' '+
                                             {11}PoolFee.ToString+' '+
-                                            {12}UTCTime.ToString);
+                                            {12}UTCTime.ToString+' '+
+                                            {13}minerscount.ToString+' '+
+                                            {14}PoolFee.ToString+' '+
+                                            {15}GetAddressBalanceFromSumary(Address).ToString);
       end;
    end
 else If UpperCase(Command) = 'SHARE' then
@@ -1659,7 +1834,9 @@ else If UpperCase(Command) = 'SHARE' then
       end;
    ThisShare   := Parameter(Linea,2);
    MinerDevice := Parameter(Linea,3);
-   ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser);
+   CreditAddress := Parameter(Linea,6);
+   If not IsValidHashAddress(CreditAddress) then CreditAddress := Address;
+   ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser, CreditAddress);
    if ValidShareValue=0 then
       begin
       TryClosePoolConnection(AContext,'True');
