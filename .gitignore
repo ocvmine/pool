@@ -5,6 +5,7 @@
 /miners
 /blocks
 /addresses
+/data
 consopool
 consopool.cfg
 consopool.exe
@@ -17,6 +18,7 @@ payments.txt
 report.txt
 frequency.dat
 sharereport.txt
+sumary.*
 sh
 *.res
 *.lps

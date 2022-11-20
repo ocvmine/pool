@@ -18,6 +18,11 @@ Type
     LastOP  : int64;
     end;
 
+   TMinersIPs = Packed Record
+     Address : string;
+     ArrIPs  : array of string;
+     end;
+
   ThreadPayment = class(TThread)
    private
      Address: string;
@@ -112,6 +117,7 @@ Procedure SetBlockBest(ThisValue:String; Laddress: string);
 Procedure CreditDonationToDeveloper(Amount:int64);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
+Procedure RunVerification();
 function IsLockedAddress(LAddress:String):boolean;
 Procedure GenerateReport(destination:integer);
 Procedure CounterReport(linea:String;Destination:integer);
@@ -123,9 +129,9 @@ function GetPrefixStr(IndexValue:integer = -1):string;
 Procedure SendSolution(Data:TSolution);
 
 // Payment threads
-Procedure SetPayThreads(Tvalue:integer);
+Procedure SetPayThreads(Tvalue:integer;AddressList:string);
 Function GetPayThreads():integer;
-Procedure DecreasePayThreads(WasGood:boolean);
+Procedure DecreasePayThreads(WasGood:boolean;Amount:int64;Address:String='');
 // Pool Balance
 Procedure SetPoolBalance(ThisValue:int64);
 Function GetPoolBalance():Int64;
@@ -138,6 +144,8 @@ Procedure SaveShareIndex();
 Procedure LoadShareIndex();
 Procedure CreditFrequency(Diff : string);
 Procedure ShareIndexReport();
+// Sumary
+function GetAddressBalanceFromSumary(address:string):int64;
 // Mainnet hashrate
 Function GetBlockValue(Block:integer;valuename:string):string;
 Procedure FillSolsArray();
@@ -156,6 +164,11 @@ Procedure AddWrongShareMiner(userip:string);
 Procedure ClearWrongShareMiner(ClearAll:boolean = true);
 Procedure AddWrongShareIp(ThisData:string);
 Procedure ClearWrongShareIp(ClearAll:boolean = true);
+// Array MinersIPs
+Procedure ClearAMI();
+Procedure AddToAMI(Address,IP : string);
+Function GetAMIString():String;
+Function GetIPData(LData:String):String;
 
 //Debug
 
@@ -163,7 +176,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.59';
+  AppVersion = 'v0.61';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -192,6 +205,8 @@ VAR
   // Sumary
   ARRAY_Sumary : Array of SumaryData;
   FILE_Sumary  : file of SumaryData;
+  // New Array of miners IPs
+  ARRAY_MinersIPs : Array of TMinersIPs;
   //TempMinersFile : File of TMinersData2;
   // Config values
   PoolName     : string[15] = 'mypool';
@@ -243,9 +258,11 @@ VAR
   // Pool
   PoolBalance      : int64 = 0;
   CheckPaysThreads : Boolean = false;
-  OpenPayThreads : integer = 0;
-    GoodPayments : integer = 0;
-    BadPayments  : integer = 0;
+  OpenPayThreads     : integer = 0;
+    GoodPayments     : integer = 0;
+    BadPayments      : integer = 0;
+    TotalPaid        : int64 = 0;
+    PendingAddresses : string = '';
   LastPaidBlock : integer = 0;
   LastBlockRate : int64 = 0;
   PoolServer : TIdTCPServer;
@@ -283,6 +300,7 @@ VAR
   CS_WrongShareMiner : TRTLCriticalSection;
   CS_WrongShareIp    : TRTLCriticalSection;
   CS_ArraySumary     : TRTLCriticalSection;
+  CS_ArrayMinersIPS  : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -332,7 +350,7 @@ if ToSend<=0 then
    ClearAddressBalance(Address, LastPayInfo);
    AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
    WasGood := true;
-   DecreasePayThreads(WasGood);
+   DecreasePayThreads(WasGood, Balance, Address);
    exit;
    end;
 if not IsValidHashAddress(Address) then
@@ -341,7 +359,7 @@ if not IsValidHashAddress(Address) then
    ClearAddressBalance(Address, LastPayInfo);
    AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
    WasGood := true;
-   DecreasePayThreads(WasGood);
+   DecreasePayThreads(WasGood, Balance, Address);
    exit;
    end;
 TrxTime := UTCTime;
@@ -355,19 +373,41 @@ TextToSend := 'NSLORDER 1 0.16 '+TrxTime.ToString+' ORDER 1 $TRFR '+OrdHash+' 1 
               ' PoolPay_'+PoolName+' 1 '+PublicKey+' '+PoolAddress+' '+Address+' '+Fee.ToString+' '+ToSend.ToString+' '+
               SignString+' '+trfHash;
 Resultado  := SendOrder(TextToSend);
-if ( (Resultado <> '') and (Parameter(Resultado,0)<>'ERROR') and(Resultado<>'Closing NODE') ) then
+if Copy(Resultado,1,2) ='OR' then
    begin
    LastPayInfo := (GetMainConsensus.block+1).ToString+':'+ToSend.ToString+':'+Resultado;
    ClearAddressBalance(Address, LastPayInfo);
    AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
    WasGood := true;
+   DecreasePayThreads(True,Balance, Address);
    end
-else
+else if Resultado <> '' then
    begin
-   ErrorCode := StrToIntDef(Parameter(Resultado,0),-99);
-   ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString,uToFile);
+   if parameter(Resultado,0) = 'ERROR' then
+      begin
+      ErrorCode := StrToIntDef(Parameter(Resultado,1),-1);
+      if ErrorCode <> 98 then
+         begin
+         ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString);
+         DecreasePayThreads(False,Balance, Address);
+         end
+      else
+         begin
+         ToLog(' Payment duplicated: '+OrdHash);
+         DecreasePayThreads(True,Balance, Address);
+         end;
+      end
+   else // Unspecified response
+      begin
+      ToLog(' Payment unspecified error: '+Resultado);
+      DecreasePayThreads(False,Balance, Address);
+      end;
+   end
+else if resultado = '' then // Empty response from node
+   begin
+   ToLog(' Payment empty response error: '+OrdHash);
+   DecreasePayThreads(False,Balance);
    end;
-DecreasePayThreads(WasGood);
 End;
 
 Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
@@ -1294,13 +1334,14 @@ End;
 
 Function DistributeBlockPayment():string;
 var
-  counter      : integer;
-  TotalShares  : Integer = 0;
-  ToDistribute : int64;
-  PerShare     : int64;
-  Comision     : int64;
-  Earned       : int64;
-  BaseReward   : int64;
+  counter       : integer;
+  TotalShares   : Integer = 0;
+  ToDistribute  : int64;
+  PerShare      : int64;
+  Comision      : int64;
+  Earned        : int64;
+  BaseReward    : int64;
+  DonationAmount: int64 = 0;
 Begin
 Result := '';
 BaseReward := GetMainConsensus.LBPoW;
@@ -1323,9 +1364,10 @@ LeaveCriticalSection(CS_Miners);
 Earned := GetMainConsensus.LBPoW-(PerShare*TotalShares);
 if PoolDonate>0 then
    begin
-   CreditDonationToDeveloper((Earned*PoolDonate) div 100);
+   DonationAmount := (Earned*PoolDonate) div 100;
+   CreditDonationToDeveloper(DonationAmount);
    end;
-Result := PerShare.ToString+' '+Earned.ToString;
+Result := PerShare.ToString+' '+Earned.ToString+' '+TotalShares.ToString+' '+DonationAmount.ToString;
 if (PerShare*TotalShares)+Earned <> BaseReward then
    ToLog(Format(' Error on distribution: %d',[BaseReward-(PerShare*TotalShares)]));
 End;
@@ -1344,6 +1386,7 @@ var
   CopyArray       : Array of TMinersData ;
   PayingAddresses : integer = 0;
   TotalToPay      : int64 = 0;
+  AddressList     : string = '';
 Begin
 ThisBlock := GetMainConsensus.block;
 SetLength(CopyArray,0);
@@ -1360,7 +1403,8 @@ For counter := 0 to length(CopyArray)-1 do
          ToLog(Format('.BLOCKED payment of %s to Address : %s',[Int2Curr(CopyArray[counter].Balance),CopyArray[counter].address]));
          continue;
          end;
-      PayingAddresses := PayingAddresses+1;
+      Inc(PayingAddresses);
+      AddressList := AddressList+' '+CopyArray[counter].address;
       TotalToPay := TotalToPay + CopyArray[counter].Balance;
       ThisThread := ThreadPayment.create(true,CopyArray[counter].address);
       ThisThread.FreeOnTerminate:=true;
@@ -1375,15 +1419,44 @@ For counter := 0 to length(CopyArray)-1 do
 if PayingAddresses>0 then
    begin
    ToLog(Format(' Paying to %d addresses : %s',[PayingAddresses,Int2Curr(TotalToPay)]));
-   SetPayThreads(PayingAddresses);
+   SetPayThreads(PayingAddresses, Trim(AddressList));
    CheckPaysThreads := true;
    end
 else
    begin
    SaveMiners();
    GenerateReport(uToFile);
-   UpdatePoolBalance;
+   //UpdatePoolBalance;
    end;
+End;
+
+Procedure RunVerification();
+var
+  ThisAddress     : string;
+  Counter         : integer = 0;
+  PayingAddresses : integer = 0;
+  ThisThread      : ThreadPayment;
+  AddressList     : string = '';
+Begin
+Repeat
+   ThisAddress := Parameter(PendingAddresses,counter);
+   If ThisAddress <> '' then
+      begin
+      Inc(PayingAddresses);
+      AddressList := AddressList+' '+ThisAddress;
+      ThisThread := ThreadPayment.create(true,Thisaddress);
+      ThisThread.FreeOnTerminate:=true;
+      ThisThread.Start;
+      end;
+   Inc(Counter);
+until ThisAddress = '';
+if PayingAddresses>0 then
+   begin
+   ToLog(Format(' Verifying %d payments',[PayingAddresses]));
+   SetPayThreads(PayingAddresses, Trim(AddressList));
+   CheckPaysThreads := true;
+   end
+
 End;
 
 Procedure GenerateReport(destination:integer);
@@ -1437,7 +1510,7 @@ if Destination = uToFile then
       writeln(ReportFile,format('%s %s %s',[AddText,BalanText,sharestext]));
       end;
    CloseFile(ReportFile);
-   ToLog(format('/Report file Generated [ %s ]',[Int2Curr(GetAddressBalance(PoolAddress)-BalanceTotal)]));
+   ToLog(format('/Report file Generated Block %d [ %s ]',[GetMainConsensus.block,Int2Curr(GetAddressBalanceFromSumary(PoolAddress)-BalanceTotal-TotalPaid)]));
    end
 else if Destination = uToConsole then
    Begin
@@ -1596,22 +1669,24 @@ TotalShares := SharesCount;
 AssignFile(BlockFile,'blocks'+DirectorySeparator+Number.ToString+'.txt');
 TRY
    Rewrite(BlockFile);
-   Writeln(BlockFile,Format('Block    : %s',[number.ToString]));
-   WriteLn(Blockfile,format('Miner    : %s',[GetMainConsensus.LBMiner]));
-   WriteLn(Blockfile,format('SolDiff  : %s',[GetMainConsensus.LBSolDiff]));
-   WriteLn(Blockfile,format('PoW      : %s',[Int2Curr(GetMainConsensus.LBPoW)]));
-   WriteLn(Blockfile,format('Miners   : %d',[MinersCount]));
-   WriteLn(Blockfile,format('Shares   : %d',[TotalShares]));
+   Writeln(BlockFile,Format('Block      : %s',[number.ToString]));
+   WriteLn(Blockfile,format('Miner      : %s',[GetMainConsensus.LBMiner]));
+   WriteLn(Blockfile,format('SolDiff    : %s',[GetMainConsensus.LBSolDiff]));
+   WriteLn(Blockfile,format('PoW        : %s',[Int2Curr(GetMainConsensus.LBPoW)]));
+   WriteLn(Blockfile,format('Miners     : %d',[MinersCount]));
+   WriteLn(Blockfile,format('Shares     : %d',[TotalShares]));
    BlockSpeed := (SharesCount*SESSION_HashPerShare) div 575;
    SetLastBlockRate(BlockSpeed);
-   WriteLn(Blockfile,format('Speed    : %d h/s',[BlockSpeed]));
-   WriteLn(Blockfile,format('Best     : %s',[GetBlockBest]));
-   WriteLn(Blockfile,format('BestMiner: %s',[GetBlockBestAddress]));
+   WriteLn(Blockfile,format('Speed      : %d h/s',[BlockSpeed]));
+   WriteLn(Blockfile,format('Best       : %s',[GetBlockBest]));
+   WriteLn(Blockfile,format('BestMiner  : %s',[GetBlockBestAddress]));
    if GetMainConsensus.LBMiner = PoolAddress then
       begin
       Distribute := DistributeBlockPayment();
-      WriteLn(Blockfile,format('PerShare : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,0),0))]));
-      WriteLn(Blockfile,format('Earned   : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,1),0))]));
+      WriteLn(Blockfile,format('PaidShares : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,2),0))]));
+      WriteLn(Blockfile,format('PerShare   : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,0),0))]));
+      WriteLn(Blockfile,format('Earned     : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,1),0))]));
+      WriteLn(Blockfile,format('Donated    : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,3),0))]));
       ToLog('.Block mined: '+number.ToString);
       end;
    CloseFile(BlockFile);
@@ -1619,7 +1694,7 @@ TRY
 EXCEPT ON E:Exception do
 END; {TRY}
 SaveMiners();
-UpdatePoolBalance;
+//UpdatePoolBalance;
 Insert(GetDiffHashrate(GetMainConsensus.LBSolDiff),ArraySols,length(ArraySols));
 Delete(ArraySols,0,1);
 CalculateMainNetHashrate;
@@ -1662,6 +1737,7 @@ if GetMainConsensus.block > GetMyLastUpdatedBlock then
 EnterCriticalSection(CS_Shares);
 SetLength(ArrShares,0);
 LeaveCriticalSection(CS_Shares);
+ClearAmi();
 ResetPrefixIndex();
 SetBlockBest(DefWorst,'');
 SetSolution(Default(TSolution));
@@ -1839,6 +1915,7 @@ else If UpperCase(Command) = 'SHARE' then
    ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser, CreditAddress);
    if ValidShareValue=0 then
       begin
+      //AddToAmi(Address,AContext.Connection.Socket.Binding.PeerIP);
       TryClosePoolConnection(AContext,'True');
       end
    else
@@ -1859,6 +1936,8 @@ else If UpperCase(Command) = 'POOLINFO' then
    end
 else If UpperCase(Command) = 'POOLPUBLIC' then
     TryClosePoolConnection(AContext,AppVersion+' '+IPsCount.ToString+' '+MaxSharesPerBlock.ToString+' '+PoolPay.ToString+' '+IPUser)
+else If UpperCase(Command) = 'POOLAMI' then
+   TryClosePoolConnection(AContext,GetAMIString)
 else
    begin
    TryClosePoolConnection(AContext,'Unknown :'+Linea);
@@ -1917,12 +1996,14 @@ else
    end;
 End;
 
-Procedure SetPayThreads(Tvalue:integer);
+Procedure SetPayThreads(Tvalue:integer;AddressList:string);
 Begin
 EnterCriticalSection(CS_PayThreads);
 OpenPayThreads := TValue;
 GoodPayments := 0;
 BadPayments  := 0;
+TotalPaid    := 0;
+PendingAddresses := AddressList;
 LeaveCriticalSection(CS_PayThreads);
 End;
 
@@ -1933,12 +2014,22 @@ Result := OpenPayThreads;
 LeaveCriticalSection(CS_PayThreads);
 End;
 
-Procedure DecreasePayThreads(WasGood:boolean);
+Procedure DecreasePayThreads(WasGood:boolean;Amount:int64;Address:String='');
 Begin
 EnterCriticalSection(CS_PayThreads);
 OpenPayThreads := OpenPayThreads-1;
 if wasGood then Inc(GoodPayments)
 else Inc(BadPayments);
+if WasGood then
+   begin
+   Inc(TotalPaid,Amount);
+   end;
+if Address <> '' then
+   begin
+   PendingAddresses := StringReplace(PendingAddresses,Address,'',[rfReplaceAll, rfIgnoreCase]);
+   PendingAddresses := DelSpace1(PendingAddresses);
+   PendingAddresses := Trim(PendingAddresses);
+   end;
 LeaveCriticalSection(CS_PayThreads);
 End;
 
@@ -2428,6 +2519,97 @@ FINALLY
 if Fiop then CloseFile(LFile);
 END;
 }
+End;
+
+Procedure ClearAMI();
+Begin
+EnterCriticalSection(CS_ArrayMinersIPS);
+SetLength(ARRAY_MinersIPs,0);
+LeaveCriticalSection(CS_ArrayMinersIPS);
+End;
+
+Function IncreaseOneMinersIP(LData:String):String;
+var
+  ThisIP : string;
+  Count  : integer;
+Begin
+ThisIP := Parameter(LData,0);
+Count   := StrToIntDef(Parameter(lData,1),1)+1;
+Result := ThisIP + ' '+ Count.ToString;
+End;
+
+Procedure AddToAMI(Address,IP : string);
+var
+  counter, counter2 : integer;
+  AddressF, IPF : Boolean;
+  NewRecord     : TMinersIPs;
+  ThisRecord    : TMinersIPs;
+Begin
+EnterCriticalSection(CS_ArrayMinersIPS);
+AddressF := False; IPF := False;
+for counter := 0 to length(ARRAY_MinersIPs)-1 do
+   begin
+   if ARRAY_MinersIPs[counter].Address = Address then
+      begin
+      ThisRecord := ARRAY_MinersIPs[counter];
+      for counter2 := 0 to length(ThisRecord.ArrIPs) do
+         begin
+         if Parameter(ThisRecord.ArrIPs[counter2],0) = IP then
+            begin
+            ThisRecord.ArrIPs[counter2] := IncreaseOneMinersIP(ThisRecord.ArrIPs[counter2]);
+            IPF := True;
+            //ToLog(' Added IP recurrency');
+            Break;
+            end;
+         end;
+      if not IPF then
+         begin
+         Insert(IP+' 1',ThisRecord.ArrIPs[counter2],length(ThisRecord.ArrIPs[counter2]));
+         //ToLog(' Added new IP');
+         end;
+      AddressF := true;
+      ARRAY_MinersIPs[counter] := ThisRecord;
+      Break;
+      end;
+   end;
+if not AddressF then
+   begin
+   NewRecord := Default(TMinersIPs);
+   NewRecord.Address:=Address;
+   SetLength(NewRecord.ArrIPs,0);
+   insert(IP+' 1',NewRecord.ArrIPs,0);
+   Insert(NewRecord,ARRAY_MinersIPs,length(ARRAY_MinersIPs));
+   //ToLog(' New AMI record: '+GetAMIString);
+   end;
+LeaveCriticalSection(CS_ArrayMinersIPS);
+End;
+
+Function GetIPData(LData:String):String;
+Begin
+Result := Parameter(LData,0)+'['+Parameter(LData,1)+']';
+End;
+
+Function GetAMIString():String;
+var
+  counter,counter2 : integer;
+  ThisAddress      : String;
+  IPsList          : string;
+  ThisRecord       : TMinersIPs;
+Begin
+Result := '';
+EnterCriticalSection(CS_ArrayMinersIPS);
+for counter := 0 to length(ARRAY_MinersIPs)-1 do
+   begin
+   ThisRecord := ARRAY_MinersIPs[counter];
+   IPsList := '';
+   for counter2 := 0 to length(ThisRecord.ArrIPs)-1 do
+      begin
+      IPsList := IPsList+ GetIPData(ThisRecord.ArrIPs[counter2]);
+      end;
+   Result := ' '+ThisRecord.Address+':'+IPsList;
+   end;
+LeaveCriticalSection(CS_ArrayMinersIPS);
+Result := TRim(Result);
 End;
 
 END. // End unit

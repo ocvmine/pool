@@ -47,6 +47,7 @@ TYPE
     end;
 
 Procedure DoNothing();
+Function GetBlockAge():integer;
 Function Parameter(LineText:String;ParamNumber:int64):String;
 Function UTCTime():int64;
 function Int2Curr(Value: int64): string;
@@ -174,6 +175,11 @@ End;
 Procedure DoNothing();
 Begin
 // Implemented for debug
+End;
+
+Function GetBlockAge():integer;
+Begin
+Result := UTCTime mod 600;
 End;
 
 Function Parameter(LineText:String;ParamNumber:int64):String;

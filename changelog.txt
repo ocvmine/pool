@@ -1,3 +1,17 @@
+Version 0.61
+
+- Implemented AMI array.
+- Fixed loss coins leak.
+
+Version 0.60
+
+- Included paid shares on block report.
+- Improved payment result handling.
+- Command available implemented.
+- Paid on block track implemented.
+- BALANCE command adjusted.
+- Payment verification implemented.
+
 Version 0.59
 
 - Support for PoPW miners requests.

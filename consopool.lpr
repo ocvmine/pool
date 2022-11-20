@@ -50,7 +50,7 @@ if number = 2 then
 if number = 3 then
    begin
    Textcolor(White);TextBackground(Blue);
-   Write(Format(' %s [ %s Noso ]',[PoolAddress,Int2Curr(GetPoolBalance)]));
+   Write(Format(' %s [ %s Noso ]',[PoolAddress,Int2Curr(PoolBalance)]));
    end;
 if number = 4 then
    begin
@@ -70,7 +70,7 @@ if number = 4 then
       Textcolor(white);TextBackground(green);
       BlockAge := UTCTime-MainConsensus.LBTimeEnd;
       Write(Format(' %d ',[BlockAge]));
-      if ( (BlockAge > 60) and (LastPaidBlock<MainConsensus.block) ) then
+      if ( (GetBlockAge > 60) and (LastPaidBlock<MainConsensus.block) ) then
          begin
          RunPayments();
          LastPaidBlock:=MainConsensus.block;
@@ -105,7 +105,7 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool]));
+   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d] [PT:%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads]));
    PrintLine(7);
    RefreshUpTime := UTCTime;
    end;
@@ -397,6 +397,7 @@ DoneCriticalSection(CS_ShareIPArr);
 DoneCriticalSection(CS_WrongShareMiner);
 DoneCriticalSection(CS_WrongShareIp);
 DoneCriticalSection(CS_ArraySumary);
+DoneCriticalSection(CS_ArrayMinersIPS);
 
 End;
 
@@ -418,6 +419,7 @@ InitCriticalSection(CS_ShareIPArr);
 InitCriticalSection(CS_WrongShareMiner);
 InitCriticalSection(CS_WrongShareIp);
 InitCriticalSection(CS_ArraySumary);
+InitCriticalSection(CS_ArrayMinersIPS);
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
@@ -429,7 +431,7 @@ SetLength(UserIpArr,0);
 SetLength(WrongShareMiner,0);
 SetLength(WrongShareIp,0);
 SetLength(ARRAY_Sumary,0);
-
+SetLength(ARRAY_MinersIPs,0);
 
 ClrScr;
 if not directoryexists('logs') then createdir('logs');
@@ -469,7 +471,7 @@ MainnetTimeStamp := GetMainnetTimestamp;
 if MainnetTimeStamp<>0 then OffSet := UTCTime-MainnetTimeStamp;
 MainConsensus := Default(TNodeData);
 LastHelpShown := DefHelpLine;
-UpdatePoolBalance;
+//UpdatePoolBalance;
 FillSolsArray();
 ToLog(' ********** New Session **********');
 if PoolAuto then PrintLine(8,StartPool);
@@ -537,9 +539,14 @@ REPEAT
             begin
             CheckPaysThreads := false;
             SaveMiners();
-            ToLog(Format(' Completed payments (%d Good - %d Fail)',[GoodPayments,BadPayments]));
+            ToLog(Format(' Completed payments (%d Good - %d Fail) %s',[GoodPayments,BadPayments,Int2Curr(TotalPAid)]));
             GenerateReport(uToFile);
-            UpdatePoolBalance;
+            SetPoolBalance(GetAddressBalanceFromSumary(PoolAddress)-TotalPaid);
+            RefreshPoolBalance := true;
+            end;
+         if ( (GetBlockAge>70) and (GetBlockAge<500) and (PendingAddresses <> '') and (not CheckPaysThreads) ) then // Verify transactions
+            begin
+            RunVerification();
             end;
          end;
       if UpdateServerInfo then PrintLine(5);
@@ -654,13 +661,17 @@ REPEAT
          ToLog(',Miners File saved',uToConsole);
          end
       else if Uppercase(Parameter(Command,0)) = 'DEBT' then ToLog(' Total debt: '+Int2Curr(GetTotalDebt))
+      else if Uppercase(Parameter(Command,0)) = 'AMI' then ToLog(' AMI: '+GetAMIString)
+      else if Uppercase(Parameter(Command,0)) = 'AVAILABLE' then ToLog(Format(' Available: %s [%s]',[Int2Curr(GetAddressBalanceFromSumary(PoolAddress)),Int2Curr(GetAddressBalanceFromSumary(PoolAddress)-GetTotalDebt-TotalPaid)]))
       else if Uppercase(Parameter(Command,0)) = 'MAINREPORT' then GenerateReport(uToConsole)
       else if Uppercase(Parameter(Command,0)) = 'REPORT' then CounterReport(command,uToConsole)
       else if Uppercase(Parameter(Command,0)) = 'CLS' then ClearPanel
       else if Uppercase(Parameter(Command,0)) = 'TEST' then RunTest
       else if Uppercase(Parameter(Command,0)) = 'BALANCE' then
          begin
-         ToLog(Format(',Pool Address: %s',[Int2Curr(GetAddressBalance(PoolAddress))]));
+         ToLog(Format(',Summary : %s',[Int2Curr(GetAddressBalanceFromSumary(PoolAddress))]));
+         ToLog(Format(',Debt    : %s',[Int2Curr(GetTotalDebt)]));
+         ToLog(Format(',Paid    : %s',[Int2Curr(TotalPaid)]));
          end
       else if Uppercase(Parameter(Command,0)) = 'SYNC' then
          begin
