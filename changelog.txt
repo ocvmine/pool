@@ -1,3 +1,7 @@
+Version 0.62
+
+- Implemented signed solutions.
+
 Version 0.61
 
 - Implemented AMI array.

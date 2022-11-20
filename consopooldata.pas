@@ -176,7 +176,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.61';
+  AppVersion = 'v0.62';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -1456,7 +1456,6 @@ if PayingAddresses>0 then
    SetPayThreads(PayingAddresses, Trim(AddressList));
    CheckPaysThreads := true;
    end
-
 End;
 
 Procedure GenerateReport(destination:integer);
@@ -1953,7 +1952,11 @@ var
   Success, WasGood : boolean;
   Mainnetbest      : string;
   ErrorCode        : String;
+  SigNature        : string;
+  SolTime          : string;
 Begin
+Soltime := UTCTime.ToString;
+Signature := GetStringSigned(PoolAddress+GetSolution.Hash+SolTime,PrivateKey);
 Node := Random(LengthNodes);
 TCPClient := TidTCPClient.Create(nil);
 TCPclient.ConnectTimeout:= 3000;
@@ -1965,7 +1968,8 @@ REPEAT
    Success := false;
    TRY
    TCPclient.Connect;
-   TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+PoolAddress+' '+GetSolution.Hash+' '+IntToStr(GetMainConsensus.block+1)+' '+UTCTime.ToString);
+   TCPclient.IOHandler.WriteLn('BESTHASH 1 2 3 4 '+PoolAddress+' '+GetSolution.Hash+' '+IntToStr(GetMainConsensus.block+1)+' '+
+                               SolTime+' '+PublicKey+' '+SigNature);
    Resultado := TCPclient.IOHandler.ReadLn(IndyTextEncoding_UTF8);
    TCPclient.Disconnect();
    Success := true;
