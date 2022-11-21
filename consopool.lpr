@@ -653,6 +653,9 @@ REPEAT
          RestartAfterQuit := true;
          FinishProgram := true;
          end
+
+     else if Uppercase(Parameter(Command,0)) = 'TESTAMI' then GenerateFakeAMI(StrToIntDef(Parameter(Command,1),1))
+
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray
       else if Uppercase(Parameter(Command,0)) = 'SAVE' then

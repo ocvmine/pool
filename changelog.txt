@@ -1,3 +1,7 @@
+Version 0.63
+
+- Activated AMI services.
+
 Version 0.62
 
 - Implemented signed solutions.

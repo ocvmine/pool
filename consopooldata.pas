@@ -170,13 +170,15 @@ Procedure AddToAMI(Address,IP : string);
 Function GetAMIString():String;
 Function GetIPData(LData:String):String;
 
+Procedure GenerateFakeAMI(count:integer);
+
 //Debug
 
 Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.62';
+  AppVersion = 'v0.63a';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -1914,7 +1916,7 @@ else If UpperCase(Command) = 'SHARE' then
    ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser, CreditAddress);
    if ValidShareValue=0 then
       begin
-      //AddToAmi(Address,AContext.Connection.Socket.Binding.PeerIP);
+      AddToAmi(Address,AContext.Connection.Socket.Binding.PeerIP);
       TryClosePoolConnection(AContext,'True');
       end
    else
@@ -2528,7 +2530,11 @@ End;
 Procedure ClearAMI();
 Begin
 EnterCriticalSection(CS_ArrayMinersIPS);
+TRY
 SetLength(ARRAY_MinersIPs,0);
+EXCEPT ON E:Exception do
+
+END; {TRY}
 LeaveCriticalSection(CS_ArrayMinersIPS);
 End;
 
@@ -2550,29 +2556,30 @@ var
   ThisRecord    : TMinersIPs;
 Begin
 EnterCriticalSection(CS_ArrayMinersIPS);
+TRY
 AddressF := False; IPF := False;
 for counter := 0 to length(ARRAY_MinersIPs)-1 do
    begin
    if ARRAY_MinersIPs[counter].Address = Address then
       begin
       ThisRecord := ARRAY_MinersIPs[counter];
-      for counter2 := 0 to length(ThisRecord.ArrIPs) do
+      for counter2 := 0 to length(ThisRecord.ArrIPs)-1 do
          begin
          if Parameter(ThisRecord.ArrIPs[counter2],0) = IP then
             begin
             ThisRecord.ArrIPs[counter2] := IncreaseOneMinersIP(ThisRecord.ArrIPs[counter2]);
             IPF := True;
-            //ToLog(' Added IP recurrency');
+            ToLog(' New recurrency to '+Address);
+            ARRAY_MinersIPs[counter] := ThisRecord;
             Break;
             end;
          end;
       if not IPF then
          begin
-         Insert(IP+' 1',ThisRecord.ArrIPs[counter2],length(ThisRecord.ArrIPs[counter2]));
-         //ToLog(' Added new IP');
+         Insert(IP+' 1',ThisRecord.ArrIPs,length(ThisRecord.ArrIPs));
+         ARRAY_MinersIPs[counter] := ThisRecord;
          end;
       AddressF := true;
-      ARRAY_MinersIPs[counter] := ThisRecord;
       Break;
       end;
    end;
@@ -2583,8 +2590,11 @@ if not AddressF then
    SetLength(NewRecord.ArrIPs,0);
    insert(IP+' 1',NewRecord.ArrIPs,0);
    Insert(NewRecord,ARRAY_MinersIPs,length(ARRAY_MinersIPs));
-   //ToLog(' New AMI record: '+GetAMIString);
+   ToLog(' New address: '+Address)
    end;
+EXCEPT ON E:Exception do
+   ToLog('AMI ADD ERROR: '+e.Message );
+END; {TRY}
 LeaveCriticalSection(CS_ArrayMinersIPS);
 End;
 
@@ -2602,6 +2612,7 @@ var
 Begin
 Result := '';
 EnterCriticalSection(CS_ArrayMinersIPS);
+TRY
 for counter := 0 to length(ARRAY_MinersIPs)-1 do
    begin
    ThisRecord := ARRAY_MinersIPs[counter];
@@ -2610,10 +2621,29 @@ for counter := 0 to length(ARRAY_MinersIPs)-1 do
       begin
       IPsList := IPsList+ GetIPData(ThisRecord.ArrIPs[counter2]);
       end;
-   Result := ' '+ThisRecord.Address+':'+IPsList;
+   Result := Result+' '+ThisRecord.Address+':'+IPsList;
    end;
+EXCEPT ON E:Exception do
+   Result := 'ERROR: '+E.Message;
+END; {TRY}
 LeaveCriticalSection(CS_ArrayMinersIPS);
 Result := TRim(Result);
+End;
+
+// This function is for test only
+
+Procedure GenerateFakeAMI(count:integer);
+var
+  Address, IP : string;
+  Counter     : integer;
+Begin
+exit;
+For counter := 1 to count do
+   begin
+ Address := Random(10).ToString;
+ IP := Random(256).ToString+'.'+Random(256).ToString+'.'+Random(256).ToString;
+ AddToAMI(Address,IP);
+ end;
 End;
 
 END. // End unit
