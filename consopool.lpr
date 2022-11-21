@@ -438,6 +438,7 @@ if not directoryexists('logs') then createdir('logs');
 if not directoryexists('miners') then createdir('miners');
 if not directoryexists('blocks') then createdir('blocks');
 if not directoryexists('addresses') then createdir('addresses');
+if not directoryexists('ami') then createdir('ami');
 AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
 Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');

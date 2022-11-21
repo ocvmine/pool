@@ -169,6 +169,8 @@ Procedure ClearAMI();
 Procedure AddToAMI(Address,IP : string);
 Function GetAMIString():String;
 Function GetIPData(LData:String):String;
+Procedure SaveAMIToFile(Block:Integer);
+Function GetAMIBlockData(Block:Integer):String;
 
 Procedure GenerateFakeAMI(count:integer);
 
@@ -223,6 +225,7 @@ VAR
   AutoDiff     : boolean = true;
   AutoValue    : integer = 500;
   PoolDonate   : integer = 5;
+  AMIPass      : string = 'default';
   // Operative
   previousNodes: string;
   ThisBlockMNs : boolean = false;
@@ -1081,6 +1084,7 @@ writeln(configfile,'autodiff '+BoolToStr(AutoDiff,True));
 writeln(configfile,'autovalue '+IntToStr(AutoValue));
 writeln(configfile,'locked '+LockedAddressesString);
 writeln(configfile,'donate '+PoolDonate.ToString);
+writeln(configfile,'amipass '+AMIPass);
 
 CloseFile(configfile);
 EXCEPT ON E:EXCEPTION do
@@ -1120,6 +1124,7 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then AutoValue := StrToIntDef(Parameter(linea,1),AutoValue);
    if uppercase(Parameter(linea,0)) = 'LOCKED' then LockedAddressesString := Parameter(linea,1);
    if uppercase(Parameter(linea,0)) = 'DONATE' then PoolDonate := StrToIntDef(Parameter(linea,1),PoolDonate);
+   if uppercase(Parameter(linea,0)) = 'AMIPASS' then AMIPass := Parameter(linea,1);
    if PoolDonate>99 then PoolDonate := 99;
    end;
 EXCEPT ON E:EXCEPTION do
@@ -1738,6 +1743,7 @@ if GetMainConsensus.block > GetMyLastUpdatedBlock then
 EnterCriticalSection(CS_Shares);
 SetLength(ArrShares,0);
 LeaveCriticalSection(CS_Shares);
+SaveAMIToFile(GetMainConsensus.block);
 ClearAmi();
 ResetPrefixIndex();
 SetBlockBest(DefWorst,'');
@@ -1925,20 +1931,23 @@ else If UpperCase(Command) = 'SHARE' then
 
       end
    end
-{
-else If UpperCase(Command) = 'POOLSTATUS' then
-   begin
-
-   end
-}
 else If UpperCase(Command) = 'POOLINFO' then
    begin
    TryClosePoolConnection(AContext,minerscount.ToString+' '+GetLastBlockRate.ToString+' '+PoolFee.ToString+' '+MainNetHashRate.ToString);
    end
 else If UpperCase(Command) = 'POOLPUBLIC' then
-    TryClosePoolConnection(AContext,AppVersion+' '+IPsCount.ToString+' '+MaxSharesPerBlock.ToString+' '+PoolPay.ToString+' '+IPUser)
+   begin
+   TryClosePoolConnection(AContext,AppVersion+' '+IPsCount.ToString+' '+MaxSharesPerBlock.ToString+' '+PoolPay.ToString+' '+IPUser)
+   end
 else If UpperCase(Command) = 'POOLAMI' then
-   TryClosePoolConnection(AContext,GetAMIString)
+   begin
+   if  Parameter(Linea,1) <> AMIPass then TryClosePoolConnection(AContext,'Invalid password')
+   else
+      begin
+      if StrToIntDef(Parameter(Linea,2),-1)<0 then TryClosePoolConnection(AContext,GetAMIString)
+      else TryClosePoolConnection(AContext,GetAMIBlockData(StrToIntDef(Parameter(Linea,2),-1)))
+      end
+   end
 else
    begin
    TryClosePoolConnection(AContext,'Unknown :'+Linea);
@@ -2569,7 +2578,7 @@ for counter := 0 to length(ARRAY_MinersIPs)-1 do
             begin
             ThisRecord.ArrIPs[counter2] := IncreaseOneMinersIP(ThisRecord.ArrIPs[counter2]);
             IPF := True;
-            ToLog(' New recurrency to '+Address);
+            //ToLog(' New recurrency to '+Address);
             ARRAY_MinersIPs[counter] := ThisRecord;
             Break;
             end;
@@ -2590,10 +2599,10 @@ if not AddressF then
    SetLength(NewRecord.ArrIPs,0);
    insert(IP+' 1',NewRecord.ArrIPs,0);
    Insert(NewRecord,ARRAY_MinersIPs,length(ARRAY_MinersIPs));
-   ToLog(' New address: '+Address)
+   //ToLog(' New address: '+Address)
    end;
 EXCEPT ON E:Exception do
-   ToLog('AMI ADD ERROR: '+e.Message );
+   //ToLog('AMI ADD ERROR: '+e.Message );
 END; {TRY}
 LeaveCriticalSection(CS_ArrayMinersIPS);
 End;
@@ -2630,6 +2639,36 @@ LeaveCriticalSection(CS_ArrayMinersIPS);
 Result := TRim(Result);
 End;
 
+Procedure SaveAMIToFile(Block:Integer);
+var
+  ThisFile : TextFile;
+Begin
+AssignFile(ThisFile,'ami/'+block.ToString+'.txt');
+TRY
+   Rewrite(ThisFile);
+   WriteLn(ThisFile,GetAMIString);
+   CloseFile(ThisFile);
+EXCEPT ON E:Exception do
+
+END; {TRY}
+End;
+
+Function GetAMIBlockData(Block:Integer):String;
+var
+  ThisFile : TextFile;
+Begin
+Result := '';
+AssignFile(ThisFile,'ami/'+block.ToString+'.txt');
+TRY
+   Reset(ThisFile);
+   ReadLn(ThisFile,Result);
+   CloseFile(ThisFile);
+EXCEPT ON E:Exception do
+   Result := Format('Error for block %d : %s',[block,E.Message]);
+END; {TRY}
+
+End;
+
 // This function is for test only
 
 Procedure GenerateFakeAMI(count:integer);
@@ -2637,7 +2676,6 @@ var
   Address, IP : string;
   Counter     : integer;
 Begin
-exit;
 For counter := 1 to count do
    begin
  Address := Random(10).ToString;
