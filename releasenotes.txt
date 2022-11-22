@@ -1,0 +1,7 @@
+Version 0.63
+
+- Activated AMI services.
+- Included MacOS support.
+- Fixed readme.
+- Changed donation address on readme.
+

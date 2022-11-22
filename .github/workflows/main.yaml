@@ -1,0 +1,117 @@
+name: main
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "*" ]
+    paths-ignore: [ "README.md", "changelog.txt", "releasenotes.txt" ]
+
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and/or Test
+    runs-on: ${{ matrix.operating-system }}
+
+    strategy:
+      matrix:
+        operating-system: [ ubuntu-latest, windows-latest, macos-latest ]
+        lazarus-versions: [ stable]
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+      with:
+        clean: true
+        set-safe-directory: true
+
+    - name: Install Lazarus
+      uses: gcarreno/setup-lazarus@v3.2
+      with:
+        lazarus-version: ${{ matrix.lazarus-versions }}
+        with-cache: false
+
+    - name: Unzip packages
+      run: unzip -q Packages/\*.zip -d Packages
+    - name: Install packages
+      run: lazbuild -qqq Packages/Indy10/indylaz.lpk
+
+    - name: Build the Main App (Windows)
+      if: ${{ matrix.operating-system == 'windows-latest' }}
+      run: |
+        lazbuild -B --bm=Release "consopool.lpi"
+        mv consopool.exe consopool-x86_64-win64.exe
+
+    - name: Build the Main App (Ubuntu)
+      if: ${{ matrix.operating-system == 'ubuntu-latest' }}
+      run: |
+        lazbuild -B --bm=Release "consopool.lpi"
+        mv consopool consopool-x86_64-linux
+
+    - name: Build the Main App (macOS)
+      if: ${{ matrix.operating-system == 'macos-latest' }}
+      run: |
+        lazbuild -B --bm=Release "consopool.lpi"
+        mv consopool consopool-x86_64-darwin
+
+    - name: Upload binary (Windows)
+      if: ${{ (matrix.operating-system == 'windows-latest')  &&  (matrix.lazarus-versions == 'stable') }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: consopool
+        path: consopool-x86_64-win64.exe
+
+    - name: Upload binary (Ubuntu)
+      if: ${{ (matrix.operating-system == 'ubuntu-latest')  &&  (matrix.lazarus-versions == 'stable') }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: consopool
+        path: consopool-x86_64-linux
+
+    - name: Upload binary (macOS)
+      if: ${{ (matrix.operating-system == 'macos-latest')  &&  (matrix.lazarus-versions == 'stable') }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: consopool
+        path: consopool-x86_64-darwin
+
+  package-release:
+    if: contains(github.ref, '/tags/')
+
+    name: Package and create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Set output
+      id: vars
+      run: echo "tag=${GITHUB_REF#refs/*/}" >> ${GITHUB_OUTPUT}
+
+    - name: Download the Release binary
+      uses: actions/download-artifact@v2
+
+    - name: List files
+      run: ls -alF consopool
+
+    - name: Create release files
+      run: |
+        cd consopool
+        chmod +x consopool-x86_64-linux consopool-x86_64-darwin
+        zip -r consopool-${{ steps.vars.outputs.tag }}-x86_64-win64.zip consopool-x86_64-win64.exe
+        tar -zcvf consopool-${{ steps.vars.outputs.tag }}-x86_64-linux.tar.gz consopool-x86_64-linux
+        tar -zcvf consopool-${{ steps.vars.outputs.tag }}-x86_64-darwin.tar.gz consopool-x86_64-darwin
+
+    - name: Create GitHub release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: consopool ${{ steps.vars.outputs.tag }}
+        body_path: releasenotes.txt
+        files: |
+          consopool/*.tar.gz
+          consopool/*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
