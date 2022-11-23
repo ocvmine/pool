@@ -129,7 +129,7 @@ function GetPrefixStr(IndexValue:integer = -1):string;
 Procedure SendSolution(Data:TSolution);
 
 // Payment threads
-Procedure SetPayThreads(Tvalue:integer;AddressList:string);
+Procedure SetPayThreads(Tvalue:integer;AddressList:string; ResetTotalPaid:Boolean = true);
 Function GetPayThreads():integer;
 Procedure DecreasePayThreads(WasGood:boolean;Amount:int64;Address:String='');
 // Pool Balance
@@ -180,7 +180,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.64';
+  AppVersion = 'v0.65';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -367,7 +367,7 @@ if not IsValidHashAddress(Address) then
    DecreasePayThreads(WasGood, Balance, Address);
    exit;
    end;
-TrxTime := UTCTime;
+TrxTime := GetMainConsensus.LBTimeEnd+60;
 trfHash := GetTransferHash(TrxTime.ToString+PoolAddress+address+ToSend.ToString+IntToStr(GetMainConsensus.block));
 OrdHash := GetOrderHash('1'+TrxTime.ToString+trfHash);
 
@@ -1460,7 +1460,7 @@ until ThisAddress = '';
 if PayingAddresses>0 then
    begin
    ToLog(Format(' Verifying %d payments',[PayingAddresses]));
-   SetPayThreads(PayingAddresses, Trim(AddressList));
+   SetPayThreads(PayingAddresses, Trim(AddressList),false);
    CheckPaysThreads := true;
    end
 End;
@@ -2011,13 +2011,14 @@ else
    end;
 End;
 
-Procedure SetPayThreads(Tvalue:integer;AddressList:string);
+Procedure SetPayThreads(Tvalue:integer;AddressList:string; ResetTotalPaid:Boolean = true);
 Begin
 EnterCriticalSection(CS_PayThreads);
 OpenPayThreads := TValue;
 GoodPayments := 0;
 BadPayments  := 0;
-TotalPaid    := 0;
+if ResetTotalPaid then
+   TotalPaid := 0;
 PendingAddresses := AddressList;
 LeaveCriticalSection(CS_PayThreads);
 End;
@@ -2052,6 +2053,7 @@ Procedure SetPoolBalance(ThisValue:int64);
 Begin
 EnterCriticalSection(CS_PoolBalance);
 PoolBalance := ThisValue;
+RefreshPoolBalance := true;
 LeaveCriticalSection(CS_PoolBalance);
 End;
 

@@ -50,7 +50,8 @@ if number = 2 then
 if number = 3 then
    begin
    Textcolor(White);TextBackground(Blue);
-   Write(Format(' %s [ %s Noso ]',[PoolAddress,Int2Curr(PoolBalance)]));
+   Write(Format(' %s [ %s Noso ]',[PoolAddress,Int2curr(GetPoolBalance)]));
+   RefreshPoolBalance := false;
    end;
 if number = 4 then
    begin
@@ -512,8 +513,7 @@ REPEAT
          end;
       if RefreshPoolBalance then
          begin
-         RefreshPoolBalance := false;
-         PrintLine(3);
+            PrintLine(3);
          end;
       if ( (MainConsensus.LBTimeEnd >= 300) and (MainConsensus.LBTimeEnd < 585)and (not ThisBlockMNs) ) then
          begin
@@ -543,9 +543,8 @@ REPEAT
             ToLog(Format(' Completed payments (%d Good - %d Fail) %s',[GoodPayments,BadPayments,Int2Curr(TotalPAid)]));
             GenerateReport(uToFile);
             SetPoolBalance(GetAddressBalanceFromSumary(PoolAddress)-TotalPaid);
-            RefreshPoolBalance := true;
             end;
-         if ( (GetBlockAge>70) and (GetBlockAge<500) and (PendingAddresses <> '') and (not CheckPaysThreads) ) then // Verify transactions
+         if ( (GetBlockAge>80) and (GetBlockAge<500) and (PendingAddresses <> '') and (not CheckPaysThreads) ) then // Verify transactions
             begin
             RunVerification();
             end;
