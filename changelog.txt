@@ -1,3 +1,11 @@
+Version 0.66
+
+- Tor IPS filter implemented.
+
+Version 0.65
+
+- Fixed leak sending duplicated payments with different timestamps.
+
 Version 0.63 - 0.64
 
 - Activated AMI services.

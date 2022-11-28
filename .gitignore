@@ -20,6 +20,10 @@ report.txt
 frequency.dat
 sharereport.txt
 sumary.*
+tornodes.txt
+torexitnodes.txt
+libeay32.dll
+ssleay32.dll
 sh
 *.res
 *.lps

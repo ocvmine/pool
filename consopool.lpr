@@ -106,7 +106,7 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d] [PT:%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads]));
+   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d] [PT:%d] [TOR:%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount]));
    PrintLine(7);
    RefreshUpTime := UTCTime;
    end;
@@ -399,7 +399,9 @@ DoneCriticalSection(CS_WrongShareMiner);
 DoneCriticalSection(CS_WrongShareIp);
 DoneCriticalSection(CS_ArraySumary);
 DoneCriticalSection(CS_ArrayMinersIPS);
-
+DoneCriticalSection(CS_TorAllowed);
+DoneCriticalSection(CS_TorBlocked);
+SLTor.Free;
 End;
 
 BEGIN
@@ -421,6 +423,8 @@ InitCriticalSection(CS_WrongShareMiner);
 InitCriticalSection(CS_WrongShareIp);
 InitCriticalSection(CS_ArraySumary);
 InitCriticalSection(CS_ArrayMinersIPS);
+InitCriticalSection(CS_TorAllowed);
+InitCriticalSection(CS_TorBlocked);
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
@@ -433,6 +437,7 @@ SetLength(WrongShareMiner,0);
 SetLength(WrongShareIp,0);
 SetLength(ARRAY_Sumary,0);
 SetLength(ARRAY_MinersIPs,0);
+SLTor := TStringlist.Create;
 
 ClrScr;
 if not directoryexists('logs') then createdir('logs');

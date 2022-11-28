@@ -6,7 +6,7 @@ INTERFACE
 
 USES
   Classes, SysUtils, coreunit, IdTCPServer, IdContext, IdGlobal, StrUtils,
-  IdTCPClient, math, fileutil, nosodig.crypto, Zipper;
+  IdTCPClient, math, fileutil, nosodig.crypto, Zipper, fphttpclient, opensslsockets;
 
 Type
 
@@ -89,7 +89,7 @@ Procedure AddShare(Share:string);
 Function SharesCount():Integer;
 Function ShareAlreadyExists(Share:string):boolean;
 Procedure CreditShare(Address,IPUser:String);
-Function ShareIsValid(Share,Address,MinerProgram,IPUser:String; CreditAddress:STring):integer;
+Function ShareIsValid(Share,Address,MinerProgram,IPUser,CreditAddress, RAWIP:STring):integer;
 
 Procedure SetSolution(Data:TSolution);
 Function GetSolution():TSolution;
@@ -174,13 +174,27 @@ Function GetAMIBlockData(Block:Integer):String;
 
 Procedure GenerateFakeAMI(count:integer);
 
+// Tor filtering
+Function GetTorNodesFile():boolean;
+Function GetTorExitNodesFile():boolean;
+Procedure LoadTorNodes();
+Function IsTorIP(IP:String):boolean;
+
+Procedure AddTorAllowed(IP:String);
+Procedure ResetTorAllowed();
+Function IPTorAllowed(IP:String):boolean;
+Procedure AddTorBlocked(IP:String);
+Procedure ResetTorBlocked();
+Function IPTorBlocked(IP:String):boolean;
+
+
 //Debug
 
 Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.65';
+  AppVersion = 'v0.66h';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -287,6 +301,12 @@ VAR
   SESSION_Started    : Int64 = 0;
   SESSION_Shares     : integer = 0;
   SESSION_HashPerShare : QWord = 0;
+
+  SLTor : TStringList;
+  TorCount : integer = 0;
+  TorAllowed : String = '';
+  TorBlocked : string = '';
+
   // Critical sections
   CS_UpdateScreen    : TRTLCriticalSection;
   CS_PrefixIndex     : TRTLCriticalSection;
@@ -306,6 +326,8 @@ VAR
   CS_WrongShareIp    : TRTLCriticalSection;
   CS_ArraySumary     : TRTLCriticalSection;
   CS_ArrayMinersIPS  : TRTLCriticalSection;
+  CS_TorAllowed      : TRTLCriticalSection;
+  CS_TorBlocked      : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -955,12 +977,32 @@ Result := BestPoolSolution;
 LeaveCriticalSection(CS_Solution);
 End;
 
-Function ShareIsValid(Share,Address,MinerProgram,IPUser:String; CreditAddress:STring):integer;
+Function ShareIsValid(Share,Address,MinerProgram,IPUser,CreditAddress, RAWIP:STring):integer;
 var
   ThisHash, ThisDiff : string;
   ThisSolution : TSolution;
 Begin
 Result := 0;
+if IPTorBlocked(RAWIP) then
+   begin
+   Inc(TorCOunt);
+   Result := 11;
+   exit;
+   end;
+if not IpTorAllowed(RAWIP) then
+   begin
+   If IsTorIP(RAWIP) then
+      begin
+      AddTorBlocked(RAWIP);
+      Inc(TorCOunt);
+      Result := 11;
+      exit;
+      end
+   else
+      begin
+      AddTorAllowed(RAWIP);
+      end;
+   end;
 if ShareAlreadyExists(Share) then
    begin
    ToLog(Format(' Error 4 [%s] [%s]',[MinerProgram,IPUser]),uToFile);
@@ -1760,6 +1802,12 @@ ClearWrongShareIP(False);
 GetSumary;
 UnZipSumary();
 LoadSumary;
+GetTorNodesFile();
+GetTorExitNodesFile();
+LoadTorNodes();
+TorCOunt := 0;
+ResetTorAllowed;
+ResetTorBlocked;
 End;
 
 Function GetPrefixIndex():Integer;
@@ -1842,6 +1890,7 @@ End;
 Class Procedure PoolServerEvents.OnConnect(AContext: TIdContext);
 var
   IPUser, Linea    : String;
+  RawIP            : STring;
   Command, Address, ThisShare : String;
   ValidShareValue : integer;
   MinerData       : string;
@@ -1854,7 +1903,8 @@ var
 Begin
 //*******************
 // IMPLEMENT TIME FILTER WITH BLOCKAGE
-IPUser := GetIpFiltered(AContext.Connection.Socket.Binding.PeerIP);
+RawIP := AContext.Connection.Socket.Binding.PeerIP;
+IPUser := GetIpFiltered(RawIP);
 Linea := '';
 TRY
 Linea := AContext.Connection.IOHandler.ReadLn('',3000,-1,IndyTextEncoding_UTF8);
@@ -1919,7 +1969,7 @@ else If UpperCase(Command) = 'SHARE' then
    MinerDevice := Parameter(Linea,3);
    CreditAddress := Parameter(Linea,6);
    If not IsValidHashAddress(CreditAddress) then CreditAddress := Address;
-   ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser, CreditAddress);
+   ValidShareValue := ShareIsValid(ThisShare,Address,MinerDevice, IPUser, CreditAddress,RawIP);
    if ValidShareValue=0 then
       begin
       AddToAmi(Address,AContext.Connection.Socket.Binding.PeerIP);
@@ -2669,6 +2719,140 @@ EXCEPT ON E:Exception do
    Result := Format('Error for block %d : %s',[block,E.Message]);
 END; {TRY}
 
+End;
+
+// Thor filtering functions
+
+Function GetTorNodesFile():boolean;
+var
+  MS: TMemoryStream;
+  DownLink : String = '';
+  extension : string;
+  Conector : TFPHttpClient;
+Begin
+result := false;
+DownLink := 'https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-nodes.lst';
+MS := TMemoryStream.Create;
+Conector := TFPHttpClient.Create(nil);
+conector.ConnectTimeout:=1000;
+conector.IOTimeout:=1000;
+conector.AllowRedirect:=true;
+   TRY
+   Conector.Get(DownLink,MS);
+   MS.SaveToFile('tornodes.txt');
+   result := true;
+   EXCEPT ON E:Exception do
+      ToLog(' Error downloading Tor nodes list: '+E.Message);
+   END{Try};
+MS.Free;
+conector.free;
+End;
+
+Function GetTorExitNodesFile():boolean;
+var
+  MS: TMemoryStream;
+  DownLink : String = '';
+  extension : string;
+  Conector : TFPHttpClient;
+Begin
+result := false;
+DownLink := 'https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst';
+MS := TMemoryStream.Create;
+Conector := TFPHttpClient.Create(nil);
+conector.ConnectTimeout:=1000;
+conector.IOTimeout:=1000;
+conector.AllowRedirect:=true;
+   TRY
+   Conector.Get(DownLink,MS);
+   MS.SaveToFile('torexitnodes.txt');
+   result := true;
+   EXCEPT ON E:Exception do
+      ToLog(' Error downloading Tor exit-nodes list: '+E.Message);
+   END{Try};
+MS.Free;
+conector.free;
+End;
+
+Procedure LoadTorNodes();
+var
+  NodesFile,ExitNodesFile : TextFile;
+  ThisData : String;
+  Added    : integer = 0;
+Begin
+SLTor.Clear;
+AssignFile(NodesFile,'tornodes.txt');
+AssignFile(ExitNodesFile,'torexitnodes.txt');
+TRY
+   Reset(NodesFile);
+   While not eof(NodesFile) do
+      begin
+      Readln(NodesFile,ThisData);
+      SLTor.Add(ThisData);
+      Inc(Added);
+      end;
+   CLoseFIle(NodesFile);
+   Reset(ExitNodesFile);
+   While not eof(ExitNodesFile) do
+      begin
+      Readln(ExitNodesFile,ThisData);
+      SLTor.Add(ThisData);
+      Inc(Added);
+      end;
+   CLoseFIle(ExitNodesFile);
+EXCEPT ON E:Exception do
+   ToLog('Error loading TOR files: '+E.Message);
+END{Try};
+ToLog( ' Loaded TOR IPs : '+Added.ToString);
+End;
+
+Function IsTorIP(IP:String):boolean;
+Begin
+if SLTOR.IndexOf(IP)>=0 then result := true
+else result := false;
+End;
+
+Procedure AddTorAllowed(IP:String);
+Begin
+EnterCriticalSection(CS_TorAllowed);
+TorAllowed := ' '+IP;
+LeaveCriticalSection(CS_TorAllowed);
+End;
+
+Procedure ResetTorAllowed();
+Begin
+EnterCriticalSection(CS_TorAllowed);
+TorAllowed := '';
+LeaveCriticalSection(CS_TorAllowed);
+End;
+
+Function IPTorAllowed(IP:String):boolean;
+Begin
+EnterCriticalSection(CS_TorAllowed);
+if AnsiContainsStr(TorAllowed,IP) then result := true
+else result := false;
+LeaveCriticalSection(CS_TorAllowed);
+End;
+
+Procedure AddTorBlocked(IP:String);
+Begin
+EnterCriticalSection(CS_TorBlocked);
+TorBlocked := ' '+IP;
+LeaveCriticalSection(CS_TorBlocked);
+End;
+
+Procedure ResetTorBlocked();
+Begin
+EnterCriticalSection(CS_TorBlocked);
+TorBlocked := '';
+LeaveCriticalSection(CS_TorBlocked);
+End;
+
+Function IPTorBlocked(IP:String):boolean;
+Begin
+EnterCriticalSection(CS_TorBlocked);
+if AnsiContainsStr(TorBlocked,IP) then result := true
+else result := false;
+LeaveCriticalSection(CS_TorBlocked);
 End;
 
 // This function is for test only

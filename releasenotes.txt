@@ -1,4 +1,4 @@
-Version 0.65
+Version 0.66
 
-- Fixed leak sending duplicated payments with different timestamps.
+- Tor IPS filter implemented.
 
