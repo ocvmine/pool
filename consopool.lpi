@@ -93,7 +93,7 @@
         <PackageName Value="indylaz"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="7">
+    <Units Count="8">
       <Unit0>
         <Filename Value="consopool.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -123,6 +123,11 @@
         <Filename Value="releasenotes.txt"/>
         <IsPartOfProject Value="True"/>
       </Unit6>
+      <Unit7>
+        <Filename Value="nosotime.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="NosoTime"/>
+      </Unit7>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

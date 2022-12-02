@@ -49,7 +49,6 @@ TYPE
 Procedure DoNothing();
 Function GetBlockAge():integer;
 Function Parameter(LineText:String;ParamNumber:int64):String;
-Function UTCTime():int64;
 function Int2Curr(Value: int64): string;
 Function BestHashReadeable(BestDiff:String):string;
 Function GetDiffHashrate(bestdiff:String):integer;
@@ -122,6 +121,9 @@ var
                             '198.46.218.125';
 
 IMPLEMENTATION
+
+USes
+  Nosotime;
 
 constructor TTGetNodeStatus.Create(const CreatePaused: Boolean; TSlot:Integer);
 begin

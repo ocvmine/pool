@@ -6,7 +6,8 @@ USES
   {$IFDEF UNIX}
    cthreads,
   {$ENDIF}
-  Classes, SysUtils, CRT, consopooldata, coreunit, NosoDig.Crypto, strutils
+  Classes, SysUtils, CRT, consopooldata, coreunit, NosoDig.Crypto, strutils,
+  nosotime
   { you can add units after this };
 
 Type
@@ -106,7 +107,7 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d] [PT:%d] [TOR:%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount]));
+   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d] [PT:%d] [TOR:%d] [VPN:%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount,VPNCount]));
    PrintLine(7);
    RefreshUpTime := UTCTime;
    end;
@@ -401,6 +402,7 @@ DoneCriticalSection(CS_ArraySumary);
 DoneCriticalSection(CS_ArrayMinersIPS);
 DoneCriticalSection(CS_TorAllowed);
 DoneCriticalSection(CS_TorBlocked);
+InitCriticalSection(CS_VPNIPs);
 SLTor.Free;
 End;
 
@@ -425,6 +427,7 @@ InitCriticalSection(CS_ArraySumary);
 InitCriticalSection(CS_ArrayMinersIPS);
 InitCriticalSection(CS_TorAllowed);
 InitCriticalSection(CS_TorBlocked);
+InitCriticalSection(CS_VPNIPs);
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
@@ -437,6 +440,7 @@ SetLength(WrongShareMiner,0);
 SetLength(WrongShareIp,0);
 SetLength(ARRAY_Sumary,0);
 SetLength(ARRAY_MinersIPs,0);
+SetLength(ARRAy_VPNIPs,0);
 SLTor := TStringlist.Create;
 
 ClrScr;
@@ -449,10 +453,13 @@ AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
 Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
+Assignfile(VPNIPsFile,'vpns.dat');
+
 if not FileExists('blocks'+DirectorySeparator+'0.txt') then CreateBlockzero();
 if not fileExists('payments.txt') then createPaymentsFile;
 if not fileExists('nodes.txt') then createNodesFile;
 if not fileExists('frequency.dat') then SaveShareIndex;
+if not fileExists('vpns.dat') then CreateVPNfile;
 if StoreShares then LoadShareIndex;
 Assignfile(PaysFile,'payments.txt');
 if not FileExists('miners'+DirectorySeparator+'miners.dat') then CreateMinersFile();
@@ -464,6 +471,7 @@ If not ResetLogs then
    end;
 if not FileExists('consopool.cfg') then SaveConfig();
 LoadConfig();
+LoadVPNFile;
 LoadNodes(GetNodesFileData());
 InitServer;
 
@@ -473,13 +481,13 @@ if PrivateKey  ='' then CloseTheApp('Private key is empty');
 if not IsValidHashAddress(PoolAddress) then CloseTheApp('Pool address is not valid');
 if GetAddressFromPublicKey(PublicKey) <> PoolAddress then CloseTheApp('Address and public key do not match');
 if not KeysMatch(PublicKey,PrivateKey) then CloseTheApp('Keys do not match');
-
-MainnetTimeStamp := GetMainnetTimestamp;
-if MainnetTimeStamp<>0 then OffSet := UTCTime-MainnetTimeStamp;
+GetTimeOffset(NTPServers);
 MainConsensus := Default(TNodeData);
 LastHelpShown := DefHelpLine;
 //UpdatePoolBalance;
 FillSolsArray();
+ProcessNewVPNs(GetVPNBanList);
+SaveVPNFile;
 ToLog(' ********** New Session **********');
 if PoolAuto then PrintLine(8,StartPool);
 DrawPanelBorders;
@@ -495,6 +503,7 @@ REPEAT
          WaitingConsensus := true;
          CurrentBlock := GetMainConsensus.block;
          GetConsensus;
+         UpdateOffset(NTPServers);
          ToLog(Format(' Consensus time : %d ms',[Consensustime]));
          if GetMainConsensus.block>CurrentBlock then
             begin
@@ -658,8 +667,7 @@ REPEAT
          RestartAfterQuit := true;
          FinishProgram := true;
          end
-
-     else if Uppercase(Parameter(Command,0)) = 'TESTAMI' then GenerateFakeAMI(StrToIntDef(Parameter(Command,1),1))
+      else if Uppercase(Parameter(Command,0)) = 'VPNS' then Tolog('.Baned VPNS: '+GetVPNBanList)
 
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray

@@ -6,7 +6,8 @@ INTERFACE
 
 USES
   Classes, SysUtils, coreunit, IdTCPServer, IdContext, IdGlobal, StrUtils,
-  IdTCPClient, math, fileutil, nosodig.crypto, Zipper, fphttpclient, opensslsockets;
+  IdTCPClient, math, fileutil, nosodig.crypto, Zipper, fphttpclient, opensslsockets,
+  IdSSLOpenSSL, IdHTTP, nosotime;
 
 Type
 
@@ -64,6 +65,11 @@ Type
     inblock      : integer;
     end;
 
+   TVPNIPs  = Packed record
+    IP           : String[15];
+    Block        : integer;
+    end;
+
 
 Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
 function SendOrder(OrderString:String):String;
@@ -73,6 +79,9 @@ Procedure CreateMinersFile();
 Procedure SaveMiners();
 Procedure CreateBlockzero();
 Procedure createPaymentsFile();
+Procedure CreateVPNfile();
+Procedure LoadVPNFile();
+Procedure SaveVPNFile();
 Procedure createNodesFile();
 Function GetNodesFileData():String;
 function SaveMnsToDisk(lineText:string): boolean;
@@ -171,22 +180,23 @@ Function GetAMIString():String;
 Function GetIPData(LData:String):String;
 Procedure SaveAMIToFile(Block:Integer);
 Function GetAMIBlockData(Block:Integer):String;
-
-Procedure GenerateFakeAMI(count:integer);
-
 // Tor filtering
 Function GetTorNodesFile():boolean;
 Function GetTorExitNodesFile():boolean;
 Procedure LoadTorNodes();
 Function IsTorIP(IP:String):boolean;
-
 Procedure AddTorAllowed(IP:String);
 Procedure ResetTorAllowed();
 Function IPTorAllowed(IP:String):boolean;
 Procedure AddTorBlocked(IP:String);
 Procedure ResetTorBlocked();
 Function IPTorBlocked(IP:String):boolean;
-
+// VPN filter
+Function GetVPNBanList():String;
+Procedure ProcessNewVPNs(VPNsList:String);
+Function IncludeVPN(LocIP:String;block:integer):boolean;
+Function VPNIPExists(LocIP:String):boolean;
+Procedure RunVPNClean(block:integer);
 
 //Debug
 
@@ -194,12 +204,14 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.66';
+  AppVersion = 'v0.67a';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
   SumaryFilename    = 'data'+directoryseparator+'sumary.psk';
   DeveloperAddress  = 'N3weyyb4HYw4KF3tXWkLbSbMcXzAZFH';
+  NTPServers        = 'ts2.aco.net:hora.roa.es:time.esa.int:time.stdtime.gov.tw:stratum-1.sjc02.svwh.net:ntp1.sp.se:1.de.pool.ntp.org:';
+  VPNsBlocksLife    = 1008;
 
   // Predefined Types for OutPut
   uToBoth      = 0;
@@ -219,7 +231,8 @@ VAR
 
   // Files
   configfile, LogFile, OldLogFile, PaysFile : TextFile;
-  MinersFile : File of TMinersData;
+  MinersFile   : File of TMinersData;
+  VPNIPsFile   : file of TVPNIPs;
   // Sumary
   ARRAY_Sumary : Array of SumaryData;
   FILE_Sumary  : file of SumaryData;
@@ -302,10 +315,12 @@ VAR
   SESSION_Shares     : integer = 0;
   SESSION_HashPerShare : QWord = 0;
 
-  SLTor : TStringList;
-  TorCount : integer = 0;
-  TorAllowed : String = '';
-  TorBlocked : string = '';
+  SLTor         : TStringList;
+  TorCount      : integer = 0;
+  TorAllowed    : String = '';
+  TorBlocked    : string = '';
+  ARRAy_VPNIPs  : Array of TVPNIPs;
+  VPNCount      : integer = 0;
 
   // Critical sections
   CS_UpdateScreen    : TRTLCriticalSection;
@@ -328,6 +343,7 @@ VAR
   CS_ArrayMinersIPS  : TRTLCriticalSection;
   CS_TorAllowed      : TRTLCriticalSection;
   CS_TorBlocked      : TRTLCriticalSection;
+  CS_VPNIPs          : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -717,6 +733,51 @@ EXCEPT ON E:EXCEPTION do
 END {TRY};
 End;
 
+Procedure CreateVPNfile();
+Begin
+TRY
+rewrite(VPNIPsFile);
+CloseFile(VPNIPsFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   writeln('Error creating VPNs file');
+   Halt(1);
+   end;
+END {TRY};
+End;
+
+Procedure LoadVPNFile();
+var
+  ThisData : TVPNIPs;
+Begin
+EnterCriticalSection(CS_VPNIPs);
+reset(VPNIPsFile);
+SetLength(ARRAy_VPNIPs,0);
+While not eof(VPNIPsFile) do
+   begin
+   read(VPNIPsFile,ThisData);
+   Insert(ThisData,ARRAy_VPNIPs,Length(ARRAy_VPNIPs));
+   end;
+CloseFile(VPNIPsFile);
+ToLog(' Loaded VPNs: '+IntToStr(length(ARRAy_VPNIPs)));
+LeaveCriticalSection(CS_VPNIPs);
+End;
+
+Procedure SaveVPNFile();
+var
+  counter : integer;
+Begin
+EnterCriticalSection(CS_VPNIPs);
+rewrite(VPNIPsFile);
+For counter := 0 to length(ARRAy_VPNIPs)-1 do
+   begin
+   write(VPNIPsFile,ARRAy_VPNIPs[counter]);
+   end;
+CloseFile(VPNIPsFile);
+ToLog(' Saved VPNs: '+IntToStr(length(ARRAy_VPNIPs)));
+LeaveCriticalSection(CS_VPNIPs);
+End;
+
 Procedure createNodesFile();
 var
   ThisFile : TextFile;
@@ -1002,6 +1063,12 @@ if not IpTorAllowed(RAWIP) then
       begin
       AddTorAllowed(RAWIP);
       end;
+   end;
+if VPNIPExists(RAWIP) then
+   begin
+   Inc(VPNCOunt);
+   Result := 12;
+   exit;
    end;
 if ShareAlreadyExists(Share) then
    begin
@@ -1806,8 +1873,12 @@ GetTorNodesFile();
 GetTorExitNodesFile();
 LoadTorNodes();
 TorCOunt := 0;
+VPNCount := 0;
 ResetTorAllowed;
 ResetTorBlocked;
+ProcessNewVPNs(GetVPNBanList);
+RunVPNClean(GetMainConsensus.block);
+SaveVPNFile;
 End;
 
 Function GetPrefixIndex():Integer;
@@ -2855,19 +2926,117 @@ else result := false;
 LeaveCriticalSection(CS_TorBlocked);
 End;
 
-// This function is for test only
+// VPN Filter
 
-Procedure GenerateFakeAMI(count:integer);
+Function GetVPNBanList():String;
 var
-  Address, IP : string;
-  Counter     : integer;
+  readedLine : string = '';
+  Conector : TFPHttpClient;
 Begin
-For counter := 1 to count do
+Result := '';
+Conector := TFPHttpClient.Create(nil);
+conector.ConnectTimeout:=3000;
+conector.IOTimeout:=3000;
+   TRY
+   readedLine := Conector.SimpleGet('http://nosostats.ddns.net:49001/api/banList1');
+   EXCEPT on E: Exception do
    begin
- Address := Random(10).ToString;
- IP := Random(256).ToString+'.'+Random(256).ToString+'.'+Random(256).ToString;
- AddToAMI(Address,IP);
- end;
+   ToLog(' Error: '+E.Message);
+   end;
+   END;//TRY
+if readedline <> '' then
+   begin
+   ReadedLine := StringReplace(ReadedLine,'[','',[rfReplaceAll, rfIgnoreCase]);
+   ReadedLine := StringReplace(ReadedLine,']','',[rfReplaceAll, rfIgnoreCase]);
+   ReadedLine := StringReplace(ReadedLine,'"','',[rfReplaceAll, rfIgnoreCase]);
+   ReadedLine := StringReplace(ReadedLine,',',' ',[rfReplaceAll, rfIgnoreCase]);
+   end;
+Result := readedline;
+Conector.Free;
+End;
+
+Procedure ProcessNewVPNs(VPNsList:String);
+var
+  ThisIP   : String;
+  Counter  : integer = 0;
+  Included : Integer = 0;
+Begin
+Repeat
+   ThisIP := Parameter(VPNsList,counter);
+   if ThisIP <> '' then
+      begin
+      if IncludeVPN(ThisIP,GetMainConsensus.block) then Inc(Included)
+      end;
+   Inc(Counter);
+until ThisIP = '';
+If Included > 0 then ToLog('.New VPN IPs: '+Included.ToString);
+End;
+
+Function IncludeVPN(LocIP:String;block:integer):boolean;
+var
+  counter       : integer;
+  AlreadyExists : boolean = false;
+  NewData       : TVPNIps;
+Begin
+Result := false;
+EnterCriticalSection(CS_VPNIPs);
+for counter := 0 to length(ARRAy_VPNIPs)-1 do
+   begin
+   if ARRAy_VPNIPs[counter].IP=LocIP then
+      begin
+      ARRAy_VPNIPs[counter].Block:=block;
+      AlreadyExists := true;
+      break;
+      end;
+   end;
+If not AlreadyExists then
+   begin
+   NewData.IP    := LocIP;
+   NewData.Block := Block;
+   Insert(NewData,ARRAy_VPNIPs,length(ARRAy_VPNIPs));
+   Result := true;
+   end;
+LEaveCriticalSection(CS_VPNIPs);
+End;
+
+Function VPNIPExists(LocIP:String):boolean;
+var
+  counter : integer;
+Begin
+result := false;
+EnterCriticalSection(CS_VPNIPs);
+for counter := 0 to length(ARRAy_VPNIPs)-1 do
+   begin
+   if ARRAy_VPNIPs[counter].IP = LocIP then
+      begin
+      result := true;
+      break;
+      end;
+   end;
+LeaveCriticalSection(CS_VPNIPs);
+End;
+
+Procedure RunVPNClean(block:integer);
+var
+  counter : integer = 0;
+  IsDone  : boolean = false;
+  Cleaned : integer = 0;
+Begin
+EnterCriticalSection(CS_VPNIPs);
+Repeat
+   if Counter >= Length(ARRAy_VPNIPs) then IsDOne := true
+   else
+      begin
+      if ARRAy_VPNIPs[counter].Block+VPNsBlocksLife < block then
+         begin
+         Delete(ARRAy_VPNIPs,counter,1);
+         Inc(Cleaned);
+         end
+      else Inc(Counter);
+      end;
+until IsDone;
+LEaveCriticalSection(CS_VPNIPs);
+if Cleaned > 0 then ToLog('.Cleaned VPNS: '+Cleaned.ToString);
 End;
 
 END. // End unit
