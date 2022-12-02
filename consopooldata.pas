@@ -204,7 +204,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.67a';
+  AppVersion = 'v0.67';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -437,6 +437,10 @@ else if Resultado <> '' then
       else
          begin
          ToLog(' Payment duplicated: '+OrdHash);
+         LastPayInfo := (GetMainConsensus.block+1).ToString+':'+ToSend.ToString+':'+Resultado;
+         ClearAddressBalance(Address, LastPayInfo);
+         AddPaymentToFile((GetMainConsensus.block+1).ToString,Address,Balance.ToString,Resultado);
+         WasGood := true;
          DecreasePayThreads(True,Balance, Address);
          end;
       end
@@ -1869,6 +1873,7 @@ ClearWrongShareIP(False);
 GetSumary;
 UnZipSumary();
 LoadSumary;
+SetPoolBalance(GetAddressBalanceFromSumary(PoolAddress));
 GetTorNodesFile();
 GetTorExitNodesFile();
 LoadTorNodes();

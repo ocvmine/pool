@@ -2,6 +2,7 @@ Version 0.67
 
 - Unit nosotime completely implemented.
 - Implemented VPN filter.
+- Pool balance update at launch.
 
 Version 0.66
 

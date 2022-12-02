@@ -107,7 +107,9 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s  %d  %d[%d]  %s  [%s]  [%d] [PT:%d] [TOR:%d] [VPN:%d]',[UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount,VPNCount]));
+   write(Format(' %s  %d  %d[%d] %s [%s] [%d] [PT:%d][TOR:%d][VPN:%d]',
+   [UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),
+   HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount,VPNCount]));
    PrintLine(7);
    RefreshUpTime := UTCTime;
    end;
@@ -345,8 +347,9 @@ for counter := 1 to 80 do
    gotoxy(counter,24);write('-');
    end;
 TextBackground(cyan);
-Textcolor(black);
-Gotoxy(1,25);write(' [F8] Change Mode {Comming soon...} ');
+Textcolor(White);
+Gotoxy(1,25);write(' [Alt+X] Exit ');
+Gotoxy(17,25);write(' [F1] Help ');
 End;
 
 Procedure CheckLogs();
