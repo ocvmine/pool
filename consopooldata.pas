@@ -197,6 +197,7 @@ Procedure ProcessNewVPNs(VPNsList:String);
 Function IncludeVPN(LocIP:String;block:integer):boolean;
 Function VPNIPExists(LocIP:String):boolean;
 Procedure RunVPNClean(block:integer);
+Procedure ExportVPNs();
 
 //Debug
 
@@ -204,7 +205,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.67';
+  AppVersion = 'v0.68';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -2955,6 +2956,7 @@ if readedline <> '' then
    ReadedLine := StringReplace(ReadedLine,']','',[rfReplaceAll, rfIgnoreCase]);
    ReadedLine := StringReplace(ReadedLine,'"','',[rfReplaceAll, rfIgnoreCase]);
    ReadedLine := StringReplace(ReadedLine,',',' ',[rfReplaceAll, rfIgnoreCase]);
+   readedline := Trim(ReadedLine);
    end;
 Result := readedline;
 Conector.Free;
@@ -2962,18 +2964,21 @@ End;
 
 Procedure ProcessNewVPNs(VPNsList:String);
 var
-  ThisIP   : String;
-  Counter  : integer = 0;
-  Included : Integer = 0;
+  ThisIP    : String;
+  Counter   : integer = 0;
+  Included  : Integer = 0;
+  Processed : integer = 0;
 Begin
 Repeat
    ThisIP := Parameter(VPNsList,counter);
    if ThisIP <> '' then
       begin
-      if IncludeVPN(ThisIP,GetMainConsensus.block) then Inc(Included)
+      if IncludeVPN(ThisIP,GetMainConsensus.block) then Inc(Included);
+      Inc(Processed);
       end;
    Inc(Counter);
 until ThisIP = '';
+ToLog(' VPNs procecessed: '+Processed.ToString);
 If Included > 0 then ToLog('.New VPN IPs: '+Included.ToString);
 End;
 
@@ -3042,6 +3047,22 @@ Repeat
 until IsDone;
 LEaveCriticalSection(CS_VPNIPs);
 if Cleaned > 0 then ToLog('.Cleaned VPNS: '+Cleaned.ToString);
+End;
+
+Procedure ExportVPNs();
+var
+  ThisFile : Textfile;
+  counter : integer;
+Begin
+Assign(Thisfile,'vpns.txt');
+EnterCriticalSection(CS_VPNIPs);
+rewrite(ThisFile);
+for counter := 0 to length(ARRAy_VPNIPs)-1 do
+   begin
+   writeln(ThisFile,ARRAy_VPNIPs[counter].IP+' '+ARRAy_VPNIPs[counter].Block.ToString);
+   end;
+CloseFile(ThisFile);
+LEaveCriticalSection(CS_VPNIPs);
 End;
 
 END. // End unit

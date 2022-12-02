@@ -1,3 +1,7 @@
+Version 0.68
+
+- Fixed error on trim from VPNs list.
+
 Version 0.67
 
 - Unit nosotime completely implemented.

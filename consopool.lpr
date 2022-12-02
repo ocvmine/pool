@@ -671,6 +671,8 @@ REPEAT
          FinishProgram := true;
          end
       else if Uppercase(Parameter(Command,0)) = 'VPNS' then Tolog('.Baned VPNS: '+GetVPNBanList)
+      else if Uppercase(Parameter(Command,0)) = 'ISVPN' then Tolog('.Ip '+Parameter(Command,1)+' is VPN : '+BoolToStr(VPNIPExists(Parameter(Command,1)),true))
+       else if Uppercase(Parameter(Command,0)) = 'EXPORTVPNS' then ExportVPNs()
 
       else if Uppercase(Parameter(Command,0)) = 'SHAREINDEX' then ShareIndexReport
       else if Uppercase(Parameter(Command,0)) = 'NETRATE' then FillSolsArray

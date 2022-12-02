@@ -1,5 +1,3 @@
-Version 0.67
+Version 0.68
 
-- Unit nosotime completely implemented.
-- Implemented VPN filter.
-- Pool balance update at launch.
+- Fixed error on trim from VPNs list.
