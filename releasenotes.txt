@@ -1,3 +1,4 @@
-Version 0.68
+Version 0.69
 
-- Fixed error on trim from VPNs list.
+- Maxshares per block info send on source request.
+- Max shares per block adjusted to 15.

@@ -205,7 +205,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.68';
+  AppVersion = 'v0.69';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -279,7 +279,7 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
-  MaxSharesPerBlock: integer = 57;
+  MaxSharesPerBlock: integer = 15;
 
   // Mainnet
   LastConsensusTry : int64   = 0;
@@ -2031,7 +2031,8 @@ If UpperCase(Command) = 'SOURCE' then
                                             {12}UTCTime.ToString+' '+
                                             {13}minerscount.ToString+' '+
                                             {14}PoolFee.ToString+' '+
-                                            {15}GetAddressBalanceFromSumary(Address).ToString);
+                                            {15}GetAddressBalanceFromSumary(Address).ToString+' '+
+                                            {16}MaxSharesPerBlock.ToString);
       end;
    end
 else If UpperCase(Command) = 'SHARE' then
