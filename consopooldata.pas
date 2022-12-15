@@ -205,14 +205,14 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.69';
+  AppVersion = 'v0.70';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
   SumaryFilename    = 'data'+directoryseparator+'sumary.psk';
   DeveloperAddress  = 'N3weyyb4HYw4KF3tXWkLbSbMcXzAZFH';
   NTPServers        = 'ts2.aco.net:hora.roa.es:time.esa.int:time.stdtime.gov.tw:stratum-1.sjc02.svwh.net:ntp1.sp.se:1.de.pool.ntp.org:';
-  VPNsBlocksLife    = 1008;
+  VPNsBlocksLife    = 144;
 
   // Predefined Types for OutPut
   uToBoth      = 0;
@@ -279,7 +279,7 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
-  MaxSharesPerBlock: integer = 15;
+  MaxSharesPerBlock: integer = 5;
 
   // Mainnet
   LastConsensusTry : int64   = 0;

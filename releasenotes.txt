@@ -1,4 +1,5 @@
-Version 0.69
+Version 0.70
 
-- Maxshares per block info send on source request.
-- Max shares per block adjusted to 15.
+- Adjusted shares per block.
+- Adjusted VPN IPs expiration time.
+
