@@ -165,8 +165,9 @@ Procedure AddUserMiner(Minerv:String);
 Procedure ClearUserMinerArray(ClearAll:boolean = true);
 Function IPsCOunt():Integer;
 Function EnoughSharesByIp(LIP:String):Boolean;
-Procedure AddUserIP(userip:string);
-Procedure ClearUserIPArray(ClearAll:boolean = true);
+Function EnoughSharesByAddress(UserAddress:String):Boolean;
+Procedure AddUserAddress(userAddress:string);
+Procedure ClearUserAddressArray(ClearAll:boolean = true);
 Procedure AddShareIP(userip:string);
 Procedure ClearShareIPArray(ClearAll:boolean = true);
 Procedure AddWrongShareMiner(userip:string);
@@ -205,7 +206,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.70';
+  AppVersion = 'v0.71';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -244,8 +245,8 @@ VAR
   PoolName     : string[15] = 'mypool';
   PoolPort     : integer = 8082;
   MinDiffBase  : string  = '00000';
-  PoolFee      : integer = 100;
-  PoolPay      : integer = 30;
+  PoolFee      : integer = 200;
+  PoolPay      : integer = 48;
   PoolAddress  : String  = '';
   PublicKey    : String  = '';
   PrivateKey   : String  = '';
@@ -279,7 +280,7 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
-  MaxSharesPerBlock: integer = 5;
+  MaxSharesPerBlock: integer = 4;
 
   // Mainnet
   LastConsensusTry : int64   = 0;
@@ -1100,6 +1101,7 @@ else
       Result := 0;
       AddShare(Share+Address);
       CreditShare(CreditAddress,IPUser);
+      AddUserAddress(Address);
       If StoreShares then CreditFrequency(ThisDiff);
       Inc(SESSION_Shares);
       //UpdateServerInfo := true;
@@ -1679,7 +1681,7 @@ if Pos(' -n:',linea) > 0 then
 else if Pos(' -r',linea) > 0 then
    begin
    if Uppercase(ReportType) = 'MINERS' then ClearUserMinerArray
-   else if Uppercase(ReportType) = 'IPS' then ClearUserIPArray
+   else if Uppercase(ReportType) = 'IPS' then ClearUserAddressArray
    else if Uppercase(ReportType) = 'SHAREIP' then ClearShareIPArray
    else if Uppercase(ReportType) = 'WRONGMINER' then ClearWrongShareMiner
    else if Uppercase(ReportType) = 'WRONGIP' then ClearWrongShareIp
@@ -1697,7 +1699,7 @@ if Uppercase(ReportType) = 'MINERS' then
    end
 else if Uppercase(ReportType) = 'IPS' then
    begin
-   ReportTitle := 'Users IP Report';
+   ReportTitle := 'Users Address Report';
    Dataname    := 'IP';
    SetLength(CopyArray,0);
    EnterCriticalSection(CS_UserIPArr);
@@ -1867,7 +1869,7 @@ SESSION_Started := UTCTime;
 RejectedShares := 0;
 if StoreShares then SaveShareIndex;
 ClearUserMinerArray(False);
-ClearUserIPArray(False);
+ClearUserAddressArray(False);
 ClearShareIPArray(False);
 ClearWrongShareMiner(False);
 ClearWrongShareIP(False);
@@ -2002,7 +2004,7 @@ Address := Parameter(Linea,1);
 If UpperCase(Command) = 'SOURCE' then
    begin
    AddUserMiner(Parameter(Linea,2));
-   AddUserIP(IPUser);
+   //AddUserIP(IPUser);
    if ( (not IsValidHashAddress(Address)) or (address = '') ) then
       begin
       TryClosePoolConnection(AContext,'WRONG_ADDRESS');
@@ -2039,6 +2041,11 @@ else If UpperCase(Command) = 'SHARE' then
    //{1}Addess {2}Share {3}Miner
    begin
    if EnoughSharesByIp(IPUser) then
+      begin
+      TryClosePoolConnection(AContext,'False SHARES_LIMIT');
+      exit;
+      end;
+   if EnoughSharesByAddress(Address) then
       begin
       TryClosePoolConnection(AContext,'False SHARES_LIMIT');
       exit;
@@ -2459,16 +2466,36 @@ For counter := 0 to length(ShareIPArr)-1 do
 LeaveCriticalSection(CS_ShareIPArr);
 End;
 
-Procedure AddUserIP(userip:string);
+Function EnoughSharesByAddress(UserAddress:String):Boolean;
+var
+  counter : integer;
+Begin
+result := false;
+EnterCriticalSection(CS_UserIPArr);
+For counter := 0 to length(UserIPArr)-1 do
+   begin
+   if UserIPArr[counter].data=UserAddress then
+      begin
+      If UserIPArr[counter].inblock >= MaxSharesPerBlock then
+         begin
+         Result := true;
+         break;
+         end;
+      end;
+   end;
+LeaveCriticalSection(CS_UserIPArr);
+End;
+
+Procedure AddUserAddress(userAddress:string);
 var
   counter : integer;
   Added : boolean = false;
 Begin
-if userip = '' then userip := 'Unknown';
+if userAddress = '' then userAddress := 'Unknown';
 EnterCriticalSection(CS_UserIPArr);
 For counter := 0 to length(UserIPArr)-1 do
    begin
-   if UserIPArr[counter].data=UserIP then
+   if UserIPArr[counter].data=userAddress then
       begin
       added := true;
       Inc(UserIPArr[counter].counter);
@@ -2479,14 +2506,14 @@ For counter := 0 to length(UserIPArr)-1 do
 if not added then
    begin
    SetLEngth(UserIPArr,LEngth(UserIPArr)+1);
-   UserIPArr[length(UserIPArr)-1].data:=UserIP;
+   UserIPArr[length(UserIPArr)-1].data:=userAddress;
    UserIPArr[length(UserIPArr)-1].counter:=1;
    UserIPArr[length(UserIPArr)-1].inBlock:=1;
    end;
 LEaveCriticalSection(CS_UserIPArr);
 End;
 
-Procedure ClearUserIPArray(ClearAll:boolean = true);
+Procedure ClearUserAddressArray(ClearAll:boolean = true);
 var
   counter:integer;
 Begin

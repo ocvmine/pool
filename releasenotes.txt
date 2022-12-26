@@ -1,5 +1,3 @@
-Version 0.70
+Version 0.71
 
-- Adjusted shares per block.
-- Adjusted VPN IPs expiration time.
-
+- Address block limit implemented.
