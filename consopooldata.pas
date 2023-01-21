@@ -206,7 +206,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.71';
+  AppVersion = 'v0.72';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -1510,6 +1510,7 @@ var
   PayingAddresses : integer = 0;
   TotalToPay      : int64 = 0;
   AddressList     : string = '';
+  ThisBlockPays   : integer = 0;
 Begin
 ThisBlock := GetMainConsensus.block;
 SetLength(CopyArray,0);
@@ -1518,6 +1519,7 @@ CopyArray := copy(ArrMiners,0,length(ArrMiners));
 LeaveCriticalSection(CS_Miners);
 For counter := 0 to length(CopyArray)-1 do
    begin
+   if ThisBlockPays > 30 then break;
    if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address<>PoolAddress) )then
       begin
       if IsLockedAddress(CopyArray[counter].address) then
@@ -1532,6 +1534,8 @@ For counter := 0 to length(CopyArray)-1 do
       ThisThread := ThreadPayment.create(true,CopyArray[counter].address);
       ThisThread.FreeOnTerminate:=true;
       ThisThread.Start;
+      Inc(ThisBlockPays);
+      sleep(100);
       end;
    if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address=PoolAddress) )then
       begin
