@@ -140,6 +140,7 @@ Procedure SendSolution(Data:TSolution);
 // Payment threads
 Procedure SetPayThreads(Tvalue:integer;AddressList:string; ResetTotalPaid:Boolean = true);
 Function GetPayThreads():integer;
+Procedure IncreasePayThread(Address:String;Amount:int64);
 Procedure DecreasePayThreads(WasGood:boolean;Amount:int64;Address:String='');
 // Pool Balance
 Procedure SetPoolBalance(ThisValue:int64);
@@ -199,6 +200,11 @@ Function IncludeVPN(LocIP:String;block:integer):boolean;
 Function VPNIPExists(LocIP:String):boolean;
 Procedure RunVPNClean(block:integer);
 Procedure ExportVPNs();
+// Active pays
+Procedure ClearActivePays();
+Procedure DecActivePays();
+Procedure IncActivePays();
+function ActivePaysCount():integer;
 
 //Debug
 
@@ -206,7 +212,7 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.72';
+  AppVersion = 'v0.73';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -214,6 +220,7 @@ CONST
   DeveloperAddress  = 'N3weyyb4HYw4KF3tXWkLbSbMcXzAZFH';
   NTPServers        = 'ts2.aco.net:hora.roa.es:time.esa.int:time.stdtime.gov.tw:stratum-1.sjc02.svwh.net:ntp1.sp.se:1.de.pool.ntp.org:';
   VPNsBlocksLife    = 144;
+  oneNoso           = 100000000;
 
   // Predefined Types for OutPut
   uToBoth      = 0;
@@ -280,7 +287,7 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
-  MaxSharesPerBlock: integer = 4;
+  MaxSharesPerBlock: integer = 3;
 
   // Mainnet
   LastConsensusTry : int64   = 0;
@@ -323,6 +330,7 @@ VAR
   TorBlocked    : string = '';
   ARRAy_VPNIPs  : Array of TVPNIPs;
   VPNCount      : integer = 0;
+  ActivePays    : integer = 0;
 
   // Critical sections
   CS_UpdateScreen    : TRTLCriticalSection;
@@ -346,6 +354,8 @@ VAR
   CS_TorAllowed      : TRTLCriticalSection;
   CS_TorBlocked      : TRTLCriticalSection;
   CS_VPNIPs          : TRTLCriticalSection;
+  // Active threads paying
+  CS_Activepays      : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -386,6 +396,10 @@ var
   LastPayInfo: string = '';
   ErrorCode  : integer = 0;
 Begin
+Repeat
+   sleep(5);
+until ActivePaysCount <2;
+IncActivePays();
 Balance := GetMinerBalance(address);
 Fee     := GetFee(Balance);
 ToSend  := Balance - Fee;
@@ -433,7 +447,7 @@ else if Resultado <> '' then
       ErrorCode := StrToIntDef(Parameter(Resultado,1),-1);
       if ErrorCode <> 98 then
          begin
-         ToLog(' Payment rejected by mainnet error: '+ErrorCode.ToString);
+         ToLog(Format(' Payment fail [%s]: %s',[Address,ErrorCode.ToString]));
          DecreasePayThreads(False,Balance, Address);
          end
       else
@@ -457,6 +471,7 @@ else if resultado = '' then // Empty response from node
    ToLog(' Payment empty response error: '+OrdHash);
    DecreasePayThreads(False,Balance);
    end;
+DecActivePays();
 End;
 
 Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
@@ -1512,15 +1527,17 @@ var
   AddressList     : string = '';
   ThisBlockPays   : integer = 0;
 Begin
+ClearActivePays();
 ThisBlock := GetMainConsensus.block;
 SetLength(CopyArray,0);
+SetPayThreads(0, '');
 EnterCriticalSection(CS_Miners);
 CopyArray := copy(ArrMiners,0,length(ArrMiners));
 LeaveCriticalSection(CS_Miners);
 For counter := 0 to length(CopyArray)-1 do
    begin
-   if ThisBlockPays > 30 then break;
-   if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address<>PoolAddress) )then
+   if ((CopyArray[counter].Balance>onenoso)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and
+       (CopyArray[counter].address<>PoolAddress) )then
       begin
       if IsLockedAddress(CopyArray[counter].address) then
          begin
@@ -1534,8 +1551,10 @@ For counter := 0 to length(CopyArray)-1 do
       ThisThread := ThreadPayment.create(true,CopyArray[counter].address);
       ThisThread.FreeOnTerminate:=true;
       ThisThread.Start;
+      IncreasePaythread(CopyArray[counter].address,CopyArray[counter].Balance);
       Inc(ThisBlockPays);
-      sleep(100);
+      if ThisBlockPays >= 30 then break;
+      sleep(1);
       end;
    if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address=PoolAddress) )then
       begin
@@ -1546,7 +1565,7 @@ For counter := 0 to length(CopyArray)-1 do
 if PayingAddresses>0 then
    begin
    ToLog(Format(' Paying to %d addresses : %s',[PayingAddresses,Int2Curr(TotalToPay)]));
-   SetPayThreads(PayingAddresses, Trim(AddressList));
+   //SetPayThreads(PayingAddresses, Trim(AddressList));
    CheckPaysThreads := true;
    end
 else
@@ -2166,6 +2185,15 @@ Function GetPayThreads():integer;
 Begin
 EnterCriticalSection(CS_PayThreads);
 Result := OpenPayThreads;
+LeaveCriticalSection(CS_PayThreads);
+End;
+
+Procedure IncreasePayThread(Address:String;Amount:int64);
+Begin
+EnterCriticalSection(CS_PayThreads);
+OpenPayThreads := OpenPayThreads+1;
+PendingAddresses := PendingAddresses+' '+address;
+PendingAddresses := Trim(PendingAddresses);
 LeaveCriticalSection(CS_PayThreads);
 End;
 
@@ -3095,6 +3123,34 @@ for counter := 0 to length(ARRAy_VPNIPs)-1 do
    end;
 CloseFile(ThisFile);
 LEaveCriticalSection(CS_VPNIPs);
+End;
+
+Procedure ClearActivePays();
+Begin
+EnterCriticalSection(CS_Activepays);
+ActivePays := 0;
+LeaveCriticalSection(CS_Activepays);
+End;
+
+Procedure DecActivePays();
+Begin
+EnterCriticalSection(CS_Activepays);
+Dec(ActivePays);
+LeaveCriticalSection(CS_Activepays);
+End;
+
+Procedure IncActivePays();
+Begin
+EnterCriticalSection(CS_Activepays);
+Inc(ActivePays);
+LeaveCriticalSection(CS_Activepays);
+End;
+
+function ActivePaysCount():integer;
+Begin
+EnterCriticalSection(CS_Activepays);
+result:= ActivePays;
+LeaveCriticalSection(CS_Activepays);
 End;
 
 END. // End unit

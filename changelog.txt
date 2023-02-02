@@ -1,3 +1,9 @@
+Version 0.73
+
+- Improved payments system.
+- Max shares reduced to 3.
+- Min payment set to 1 noso.
+
 Version 0.72
 
 - Pays per block limitted to 30.

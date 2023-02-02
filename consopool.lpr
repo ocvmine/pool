@@ -405,7 +405,8 @@ DoneCriticalSection(CS_ArraySumary);
 DoneCriticalSection(CS_ArrayMinersIPS);
 DoneCriticalSection(CS_TorAllowed);
 DoneCriticalSection(CS_TorBlocked);
-InitCriticalSection(CS_VPNIPs);
+DoneCriticalSection(CS_VPNIPs);
+DoneCriticalSection(CS_Activepays);
 SLTor.Free;
 End;
 
@@ -431,6 +432,7 @@ InitCriticalSection(CS_ArrayMinersIPS);
 InitCriticalSection(CS_TorAllowed);
 InitCriticalSection(CS_TorBlocked);
 InitCriticalSection(CS_VPNIPs);
+InitCriticalSection(CS_Activepays);
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
@@ -561,7 +563,7 @@ REPEAT
             GenerateReport(uToFile);
             SetPoolBalance(GetAddressBalanceFromSumary(PoolAddress)-TotalPaid);
             end;
-         if ( (GetBlockAge>80) and (GetBlockAge<500) and (PendingAddresses <> '') and (not CheckPaysThreads) ) then // Verify transactions
+         if ( (GetBlockAge>150) and (GetBlockAge<500) and (PendingAddresses <> '') and (not CheckPaysThreads) ) then // Verify transactions
             begin
             RunVerification();
             end;
