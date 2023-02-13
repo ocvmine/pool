@@ -1,5 +1,5 @@
-Version 0.73
+Version 0.74
 
-- Improved payments system.
-- Max shares reduced to 3.
-- Min payment set to 1 noso.
+- Removed deprecated balances.
+- Abandoned balance credited to NPrjectPrtcRandmJacptE5.
+- VPNsBlocksLife set to 24.

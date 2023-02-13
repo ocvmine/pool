@@ -124,6 +124,7 @@ Function GetBlockBest():String;
 Function GetBlockBestAddress():String;
 Procedure SetBlockBest(ThisValue:String; Laddress: string);
 Procedure CreditDonationToDeveloper(Amount:int64);
+Procedure CreditFundsToProject(Amount:int64);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
 Procedure RunVerification();
@@ -212,14 +213,15 @@ Procedure RunTest();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.73';
+  AppVersion = 'v0.74';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
   SumaryFilename    = 'data'+directoryseparator+'sumary.psk';
   DeveloperAddress  = 'N3weyyb4HYw4KF3tXWkLbSbMcXzAZFH';
+  ProjectAddress    = 'NPrjectPrtcRandmJacptE5';
   NTPServers        = 'ts2.aco.net:hora.roa.es:time.esa.int:time.stdtime.gov.tw:stratum-1.sjc02.svwh.net:ntp1.sp.se:1.de.pool.ntp.org:';
-  VPNsBlocksLife    = 144;
+  VPNsBlocksLife    = 24;
   oneNoso           = 100000000;
 
   // Predefined Types for OutPut
@@ -1470,6 +1472,35 @@ LEaveCriticalSection(CS_Miners);
 ToLog(' Donated to dev: '+Int2curr(amount));
 End;
 
+Procedure CreditFundsToProject(Amount:int64);
+var
+  Counter  : integer;
+  Found    : boolean = false;
+  NewMiner : TMinersData;
+Begin
+EnterCriticalSection(CS_Miners);
+For counter := 0 to length(ArrMiners)-1 do
+   begin
+   if ArrMiners[counter].address =ProjectAddress then
+      begin
+      ArrMiners[counter].Balance:=ArrMiners[counter].Balance+Amount;
+      Found := true;
+      Break;
+      end;
+   end;
+If not found then
+   begin
+   NewMiner := Default(TMinersData);
+   NewMiner.address:=ProjectAddress;
+   NewMiner.Shares:=0;
+   NewMiner.Balance:=Amount;
+   NewMiner.LastPay:=GetMainConsensus.block;
+   Insert(NewMiner,ArrMiners,Length(ArrMiners));
+   end;
+LEaveCriticalSection(CS_Miners);
+//ToLog(' Credited to project: '+Int2curr(amount));
+End;
+
 Function DistributeBlockPayment():string;
 var
   counter       : integer;
@@ -1526,6 +1557,8 @@ var
   TotalToPay      : int64 = 0;
   AddressList     : string = '';
   ThisBlockPays   : integer = 0;
+  ToProject       : int64;
+  TotalProject    : int64 = 0;
 Begin
 ClearActivePays();
 ThisBlock := GetMainConsensus.block;
@@ -1556,6 +1589,14 @@ For counter := 0 to length(CopyArray)-1 do
       if ThisBlockPays >= 30 then break;
       sleep(1);
       end;
+   if ((CopyArray[counter].Balance<onenoso)and(CopyArray[counter].LastPay+1008<= ThisBlock)and
+       (CopyArray[counter].address<>PoolAddress) and (CopyArray[counter].address<>ProjectAddress) )then
+      begin
+      ToProject := CopyArray[counter].Balance;
+      ClearAddressBalance(CopyArray[counter].address,ThisBlock.ToString+':'+CopyArray[counter].Balance.ToString+':'+'OwnPayment');
+      CreditFundsToProject(ToProject);
+      Inc(TotalProject,ToProject);
+      end;
    if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address=PoolAddress) )then
       begin
       // Same address than pool address, do not send to save fees.
@@ -1574,6 +1615,8 @@ else
    GenerateReport(uToFile);
    //UpdatePoolBalance;
    end;
+if TotalProject >0 then
+   ToLog(Format(' Credited to jackpot : %s',[Int2Curr(TotalProject)]));
 End;
 
 Procedure RunVerification();
