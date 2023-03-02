@@ -33,13 +33,6 @@ Type
      constructor Create(const CreatePaused: Boolean; TAddress:string);
    end;
 
-   ThreadUpdateBalance = class(TThread)
-    protected
-      procedure Execute; override;
-    public
-      Constructor Create(CreatePaused : boolean);
-    end;
-
   PoolServerEvents = class
     class procedure OnExecute(AContext: TIdContext);
     class procedure OnConnect(AContext: TIdContext);
@@ -59,6 +52,17 @@ Type
     LastPayOrder : String[120];
     end;
 
+   TMinersDataNew = Packed Record
+    address      : string[40];
+    Balance      : int64;
+    LastPay      : integer;
+    Shares       : integer;
+    LastPayOrder : String[120];
+    Password     : string[16];
+    BlockRegister: integer;
+    LastActive   : integer;
+    end;
+
    TCounter = Packed record
     data         : string[60];
     counter      : integer;
@@ -73,10 +77,13 @@ Type
 
 Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
 function SendOrder(OrderString:String):String;
-function GetAddressBalance(Address:String):int64;
 
+{Miners data file}
+Procedure MigrateMinersFile();
 Procedure CreateMinersFile();
 Procedure SaveMiners();
+Procedure LoadMiners();
+
 Procedure CreateBlockzero();
 Procedure createPaymentsFile();
 Procedure CreateVPNfile();
@@ -86,10 +93,8 @@ Procedure createNodesFile();
 Function GetNodesFileData():String;
 function SaveMnsToDisk(lineText:string): boolean;
 function GetMyLastUpdatedBlock():int64;
-Procedure LoadMiners();
 Function MinersCount():integer;
 Function GetMinerBalance(address:string):int64;
-Function GetAddressNosoBalance(LAddress:String):Int64;
 Function GetMinerData(address:string):string;
 Procedure ClearAddressBalance(Address, LastPayInfo:string);
 Function GetTotalDebt():Int64;
@@ -117,8 +122,6 @@ Procedure TryClosePoolConnection(AContext: TIdContext; closemsg:string='');
 Function StartPool():String;
 Function UpTime():string;
 Function StopPool():String;
-Function GetDiffHashrate(bestdiff:String):integer;
-Function GetSessionSpeed(): int64;
 Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
 Function GetBlockBest():String;
 Function GetBlockBestAddress():String;
@@ -128,7 +131,6 @@ Procedure CreditFundsToProject(Amount:int64);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
 Procedure RunVerification();
-function IsLockedAddress(LAddress:String):boolean;
 Procedure GenerateReport(destination:integer);
 Procedure CounterReport(linea:String;Destination:integer);
 Procedure BuildNewBlock();
@@ -146,8 +148,7 @@ Procedure DecreasePayThreads(WasGood:boolean;Amount:int64;Address:String='');
 // Pool Balance
 Procedure SetPoolBalance(ThisValue:int64);
 Function GetPoolBalance():Int64;
-Procedure UpdatePoolBalance();
-// LAstBlockRate
+// LastBlockRate
 Procedure SetLastBlockRate(ThisValue:int64);
 Function GetLastBlockRate():Int64;
 // ShareIndex
@@ -207,13 +208,9 @@ Procedure DecActivePays();
 Procedure IncActivePays();
 function ActivePaysCount():integer;
 
-//Debug
-
-Procedure RunTest();
-
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.74';
+  AppVersion = 'v0.75';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -243,13 +240,13 @@ VAR
   // Files
   configfile, LogFile, OldLogFile, PaysFile : TextFile;
   MinersFile   : File of TMinersData;
+  MinersFileNew: File of TMinersDataNew;
   VPNIPsFile   : file of TVPNIPs;
   // Sumary
   ARRAY_Sumary : Array of SumaryData;
   FILE_Sumary  : file of SumaryData;
   // New Array of miners IPs
   ARRAY_MinersIPs : Array of TMinersIPs;
-  //TempMinersFile : File of TMinersData2;
   // Config values
   PoolName     : string[15] = 'mypool';
   PoolPort     : integer = 8082;
@@ -265,6 +262,7 @@ VAR
   PoolDonate   : integer = 5;
   AMIPass      : string = 'default';
   // Operative
+  MinTreshold  : int64 = onenoso;
   previousNodes: string;
   ThisBlockMNs : boolean = false;
   ArraySols    : array of integer;
@@ -312,8 +310,8 @@ VAR
   PrefixIndex: Integer = 0;
   MinerDiff  : String = '';
   IPMiners: integer = 100;
-  LockedAddressesString : string = '';
-  ArrMiners : Array of TMinersData;
+  //ArrMiners : Array of TMinersData;
+  ArrMinersNew : Array of TMinersDataNew;
   ArrShares : Array of string;
   BlockTargetHash : String = '';
   ThisBlockBest   : String = DefWorst;
@@ -361,20 +359,7 @@ VAR
 
 IMPLEMENTATION
 
-constructor ThreadUpdateBalance.Create(CreatePaused : boolean);
-Begin
-inherited Create(CreatePaused);
-FreeOnTerminate := True;
-End;
-
-procedure ThreadUpdateBalance.Execute;
-var
-  ThisValue : int64 = 0;
-Begin
-ThisValue := GetAddressBalance(PoolAddress);
-SetPoolBalance(ThisValue);
-RefreshPoolBalance := true;
-End;
+{$REGION Payment thread}
 
 constructor ThreadPayment.Create(const CreatePaused: Boolean; TAddress:string);
 Begin
@@ -480,11 +465,14 @@ Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
 var
   ThisFile : TextFile;
 Begin
-EnterCriticalSection(CS_PaysFile);
-Append(PaysFile);
-Writeln(PaysFile,Format('%s %s %s %s',[block,destino,monto,OrderID]));
-CloseFile(PaysFile);
-LeaveCriticalSection(CS_PaysFile);
+if fileexists('payments.txt') then
+   begin
+   EnterCriticalSection(CS_PaysFile);
+   Append(PaysFile);
+   Writeln(PaysFile,Format('%s %s %s %s',[block,destino,monto,OrderID]));
+   CloseFile(PaysFile);
+   LeaveCriticalSection(CS_PaysFile);
+   end;
 AssignFile(ThisFile,'addresses'+directoryseparator+destino+'.txt');
 TRY
 if not fileExists('addresses'+directoryseparator+destino+'.txt') then rewrite(ThisFile)
@@ -531,6 +519,10 @@ UNTIL ( (WasDone) or (Trys=3) );
 if client.Connected then Client.Disconnect();
 client.Free;
 End;
+
+{$ENDREGION}
+
+{$REGION Summary}
 
 function GetSumary():boolean;
 var
@@ -640,51 +632,37 @@ for cont := 0 to length(ARRAY_Sumary)-1 do
 LEaveCriticalSection(CS_ArraySumary);
 End;
 
-function GetAddressBalance(Address:String):int64;
-var
-  Client : TidTCPClient;
-  RanNode : integer;
-  ThisNode : TNodeData;
-  Trys : integer = 0;
-  WasDone : boolean = false;
-Begin
-Result := 0;
-Client := TidTCPClient.Create(nil);
-REPEAT
-   RanNode := Random(LengthNodes);
-   ThisNode := GetNodeIndex(RanNode);
-   Client.Host:=ThisNode.host;
-   Client.Port:=ThisNode.port;
-   Client.ConnectTimeout:= 1000;
-   Client.ReadTimeout:=800;
-   TRY
-   Client.Connect;
-   Client.IOHandler.WriteLn('NSLBALANCE '+Address);
-   Result := StrToInt64Def(Client.IOHandler.ReadLn(IndyTextEncoding_UTF8),0);
-   WasDone := true;
-   EXCEPT on E:Exception do
-      begin
+{$ENDREGION}
 
-      WasDone := False;
-      end;
-   END{Try};
-Inc(Trys);
-UNTIL ( (WasDone) or (Trys = 5) );
-if client.Connected then Client.Disconnect();
-client.Free;
-End;
+{$REGION Miner data file}
 
 Procedure CreateMinersFile();
 Begin
 TRY
-rewrite(MinersFile);
-CloseFile(MinersFile);
+rewrite(MinersFileNew);
+CloseFile(MinersFileNew);
 EXCEPT ON E:EXCEPTION do
    begin
    writeln('Error creating miners file');
    Halt(1);
    end;
 END {TRY};
+End;
+
+Procedure LoadMiners();
+var
+  ThisData : TMinersDataNew;
+Begin
+reset(MinersFileNew);
+EnterCriticalSection(CS_Miners);
+SetLength(ArrMinersNew,0);
+While not eof(MinersFileNew) do
+   begin
+   read(MinersFileNew,ThisData);
+   Insert(ThisData,ArrMinersNew,Length(ArrMinersNew));
+   end;
+LeaveCriticalSection(CS_Miners);
+CloseFile(MinersFileNew);
 End;
 
 Procedure SaveMiners();
@@ -695,17 +673,17 @@ var
 Begin
 EnterCriticalSection(CS_Miners);
 TRY
-rewrite(MinersFile);
+rewrite(MinersFileNew);
    TRY
    FileIsOpen := true;
-   for counter := 0 to length(ArrMiners)-1 do
+   for counter := 0 to length(ArrMinersNew)-1 do
       begin
-      if ( (ArrMiners[counter].Shares>0) or (ArrMiners[counter].Balance>0) or((ArrMiners[counter].LastPay+36)<GetMAinConsensus.block) ) then
+      if ( (ArrMinersNew[counter].Shares>0) or (ArrMinersNew[counter].Balance>0) or((ArrMinersNew[counter].LastPay+36)<GetMAinConsensus.block) ) then
          begin
-         if not AnsiContainsStr(AlreadyAdded,ArrMiners[counter].address) then
+         if not AnsiContainsStr(AlreadyAdded,ArrMinersNew[counter].address) then
             begin
-            write(MinersFile,ArrMiners[counter]);
-            AlreadyAdded := AlreadyAdded+ArrMiners[counter].address+',';
+            write(MinersFileNew,ArrMinersNew[counter]);
+            AlreadyAdded := AlreadyAdded+ArrMinersNew[counter].address+',';
             end;
          end;
       end;
@@ -714,7 +692,7 @@ rewrite(MinersFile);
       ToLog('.CRITICAL: Error saving miners file. '+E.Message);
       end;
    END {TRY};
-CloseFile(MinersFile);
+CloseFile(MinersFileNew);
 EXCEPT ON E:EXCEPTION do
    begin
     ToLog('.CRITICAL: Error accesing miners file. '+E.Message);
@@ -723,6 +701,41 @@ END {TRY};
 LeaveCriticalSection(CS_Miners);
 LoadMiners;
 End;
+
+Procedure MigrateMinersFile();
+var
+  OldData : TMinersData;
+  NewData : TMinersDataNew;
+  TotalMi : integer = 0;
+Begin
+reset(MinersFile);
+rewrite(MinersFileNew);
+EnterCriticalSection(CS_Miners);
+While not eof(MinersFile) do
+   begin
+   read(MinersFile,OldData);
+   NewData := Default(TMinersDataNew);
+   NewData.address      := OldData.address;
+   NewData.Balance      := OldData.Balance;
+   NewData.LastPay      := OldData.LastPay;
+   NewData.Shares       := OldData.Shares;
+   NewData.LastPayOrder := OldData.LastPayOrder;
+   NewData.Password     := '';
+   NewData.BlockRegister:= 0;
+   NewData.LastActive   := 0;
+   write(MinersFileNew,NewData);
+   Inc(TotalMi);
+   end;
+LeaveCriticalSection(CS_Miners);
+CloseFile(MinersFile);
+CloseFile(MinersFileNew);
+if TotalMi>0 then ToLog(Format(' Migrated data to PoPW: %d',[TotalMi]));
+RenameFile ('miners'+DirectorySeparator+'miners.dat','miners'+DirectorySeparator+'minersold.dat');
+End;
+
+{$ENDREGION}
+
+{$REGION create default files}
 
 Procedure CreateBlockzero();
 var
@@ -769,6 +782,28 @@ EXCEPT ON E:EXCEPTION do
 END {TRY};
 End;
 
+Procedure CreateNodesFile();
+var
+  ThisFile : TextFile;
+Begin
+AssignFile(ThisFile,'nodes.txt');
+TRY
+rewrite(ThisFile);
+write(ThisFile,DefaultNodes);
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   ToLog(' Error creating nodes file');
+   Halt(1);
+   end;
+END {TRY};
+previousNodes := DefaultNodes;
+End;
+
+{$ENDREGION}
+
+{$REGION VPNs file management}
+
 Procedure LoadVPNFile();
 var
   ThisData : TVPNIPs;
@@ -801,23 +836,9 @@ ToLog(' Saved VPNs: '+IntToStr(length(ARRAy_VPNIPs)));
 LeaveCriticalSection(CS_VPNIPs);
 End;
 
-Procedure createNodesFile();
-var
-  ThisFile : TextFile;
-Begin
-AssignFile(ThisFile,'nodes.txt');
-TRY
-rewrite(ThisFile);
-write(ThisFile,DefaultNodes);
-CloseFile(ThisFile);
-EXCEPT ON E:EXCEPTION do
-   begin
-   ToLog(' Error creating nodes file');
-   Halt(1);
-   end;
-END {TRY};
-previousNodes := DefaultNodes;
-End;
+{$ENDREGION}
+
+{$REGION Nodes file}
 
 Function GetNodesFileData():String;
 var
@@ -840,7 +861,6 @@ End;
 function SaveMnsToDisk(lineText:string): boolean;
 var
   ThisFile : TextFile;
-  Fiop     : boolean = false;
 Begin
 Result := true;
 if LineText = '' then exit;
@@ -848,7 +868,6 @@ AssignFile(ThisFile,'nodes.txt');
 TRY
 rewrite(ThisFile);
    TRY
-   Fiop := true;
    write(ThisFile,lineText);
    EXCEPT ON E:EXCEPTION do
       begin
@@ -864,6 +883,10 @@ EXCEPT ON E:EXCEPTION do
    end;
 END {TRY};
 End;
+
+{$ENDREGION}
+
+{$REGION Miscellaneous}
 
 // Returns the last processed block
 function GetMyLastUpdatedBlock():int64;
@@ -889,26 +912,35 @@ BlockFiles := TStringList.Create;
 BlockFiles.Free;
 end;
 
-Procedure LoadMiners();
+Function UpTime():string;
 var
-  ThisData : TMinersData;
+  TotalSeconds,days,hours,minutes,seconds, remain : integer;
 Begin
-reset(MinersFile);
-EnterCriticalSection(CS_Miners);
-SetLength(ArrMiners,0);
-While not eof(MinersFile) do
+if SESSION_Started = 0 then
    begin
-   read(MinersFile,ThisData);
-   Insert(ThisData,ArrMiners,Length(ArrMiners));
+   Result := '00:00:00';
+   exit;
    end;
-LeaveCriticalSection(CS_Miners);
-CloseFile(MinersFile);
+Totalseconds := UTCTime-SESSION_Started;
+Days := Totalseconds div 86400;
+remain := Totalseconds mod 86400;
+hours := remain div 3600;
+remain := remain mod 3600;
+minutes := remain div 60;
+remain := remain mod 60;
+seconds := remain;
+if Days > 0 then Result:= Format('%dd %.2d:%.2d:%.2d', [Days, Hours, Minutes, Seconds])
+else Result:= Format('%.2d:%.2d:%.2d', [Hours, Minutes, Seconds]);
 End;
+
+{$ENDREGION}
+
+{$REGION Miners data management}
 
 Function MinersCount():Integer;
 Begin
 EnterCriticalSection(CS_Miners);
-Result := Length(ArrMiners);
+Result := Length(ArrMinersNew);
 LeaveCriticalSection(CS_Miners);
 End;
 
@@ -918,21 +950,15 @@ var
 Begin
 Result := 0;
 EnterCriticalSection(CS_Miners);
-for counter := 0 to length(ArrMiners)-1 do
+for counter := 0 to length(ArrMinersNew)-1 do
    begin
-   if ArrMiners[counter].address = address then
+   if ArrMinersNew[counter].address = address then
       begin
-      result := ArrMiners[counter].Balance;
+      result := ArrMinersNew[counter].Balance;
       break;
       end;
    end;
 LeaveCriticalSection(CS_Miners);
-End;
-
-Function GetAddressNosoBalance(LAddress:String):Int64;
-Begin
-Result := 0;
-Result := GetAddressBalance(LAddress);
 End;
 
 Function GetMinerData(address:string):string;
@@ -942,13 +968,13 @@ var
 Begin
 Result := '';
 EnterCriticalSection(CS_Miners);
-for counter := 0 to length(ArrMiners)-1 do
+for counter := 0 to length(ArrMinersNew)-1 do
    begin
-   if ArrMiners[counter].address = address then
+   if ArrMinersNew[counter].address = address then
       begin
-      BlocksTill := PoolPay-(GetMainConsensus.block-ArrMiners[counter].LastPay);
+      BlocksTill := PoolPay-(GetMainConsensus.block-ArrMinersNew[counter].LastPay);
       If BlocksTill<0 then BlocksTill := 0;
-      result := Format('%d %d %s',[ArrMiners[counter].Balance,BlocksTill,ArrMiners[counter].LastPayOrder]);
+      result := Format('%d %d %s',[ArrMinersNew[counter].Balance,BlocksTill,ArrMinersNew[counter].LastPayOrder]);
       break;
       end;
    end;
@@ -960,13 +986,13 @@ var
   counter : integer;
 Begin
 EnterCriticalSection(CS_Miners);
-for counter := 0 to length(ArrMiners)-1 do
+for counter := 0 to length(ArrMinersNew)-1 do
    begin
-   if ArrMiners[counter].address = address then
+   if ArrMinersNew[counter].address = address then
       begin
-      ArrMiners[counter].Balance := 0;
-      ArrMiners[counter].LastPay:=GetMAinConsensus.block;
-      ArrMiners[counter].LastPayOrder:=LastPayInfo;
+      ArrMinersNew[counter].Balance := 0;
+      ArrMinersNew[counter].LastPay:=GetMAinConsensus.block;
+      ArrMinersNew[counter].LastPayOrder:=LastPayInfo;
       break;
       end;
    end;
@@ -979,12 +1005,43 @@ var
 Begin
 result := 0;
 EnterCriticalSection(CS_Miners);
-for counter := 0 to length(ArrMiners)-1 do
-   begin
-   result := result + ArrMiners[counter].Balance;
-   end;
+for counter := 0 to length(ArrMinersNew)-1 do
+   Inc(Result,ArrMinersNew[counter].Balance);
 LeaveCriticalSection(CS_Miners);
 End;
+
+Procedure CreditShare(Address,IPUser:String);
+var
+  counter : integer;
+  Credited : boolean = false;
+  NewMiner : TMinersDataNew;
+Begin
+EnterCriticalSection(CS_Miners);
+For counter := 0 to length(ArrMinersNew)-1 do
+   begin
+   if ArrMinersNew[counter].address = address then
+      begin
+      Credited := true;
+      Inc(ArrMinersNew[counter].Shares);
+      break
+      end;
+   end;
+if Not Credited then
+   begin
+   NewMiner := Default(TMinersDataNew);
+   NewMiner.address:=address;
+   NewMiner.Shares:=1;
+   NewMiner.Balance:=0;
+   NewMiner.LastPay:=GetMainConsensus.block;
+   Insert(NewMiner,ArrMinersNew,Length(ArrMinersNew));
+   end;
+LeaveCriticalSection(CS_Miners);
+AddShareIP(IPUser);
+End;
+
+{$ENDREGION}
+
+{$REGION Block shares management}
 
 Function ShareAlreadyExists(Share:string):boolean;
 var
@@ -1003,35 +1060,6 @@ For counter := 0 to length(ArrShares)-1 do
 LeaveCriticalSection(CS_Shares);
 End;
 
-Procedure CreditShare(Address,IPUser:String);
-var
-  counter : integer;
-  Credited : boolean = false;
-  NewMiner : TMinersData;
-Begin
-EnterCriticalSection(CS_Miners);
-For counter := 0 to length(ArrMiners)-1 do
-   begin
-   if ArrMiners[counter].address = address then
-      begin
-      Credited := true;
-      ArrMiners[counter].Shares:=ArrMiners[counter].Shares+1;
-      break
-      end;
-   end;
-if Not Credited then
-   begin
-   NewMiner := Default(TMinersData);
-   NewMiner.address:=address;
-   NewMiner.Shares:=1;
-   NewMiner.Balance:=0;
-   NewMiner.LastPay:=GetMainConsensus.block;
-   Insert(NewMiner,ArrMiners,Length(ArrMiners));
-   end;
-LeaveCriticalSection(CS_Miners);
-AddShareIP(IPUser);
-End;
-
 Procedure AddShare(Share:string);
 Begin
 EnterCriticalSection(CS_Shares);
@@ -1046,21 +1074,6 @@ Result := length(ArrShares);
 LeaveCriticalSection(CS_Shares);
 End;
 
-Procedure SetSolution(Data:TSolution);
-Begin
-EnterCriticalSection(CS_Solution);
-BestPoolSolution := Data;
-if BestPoolSolution.Diff = '' then BestPoolSolution.Diff := 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
-LeaveCriticalSection(CS_Solution);
-End;
-
-Function GetSolution():TSolution;
-Begin
-EnterCriticalSection(CS_Solution);
-Result := BestPoolSolution;
-LeaveCriticalSection(CS_Solution);
-End;
-
 Function ShareIsValid(Share,Address,MinerProgram,IPUser,CreditAddress, RAWIP:STring):integer;
 var
   ThisHash, ThisDiff : string;
@@ -1069,7 +1082,7 @@ Begin
 Result := 0;
 if IPTorBlocked(RAWIP) then
    begin
-   Inc(TorCOunt);
+   Inc(TorCount);
    Result := 11;
    exit;
    end;
@@ -1121,7 +1134,6 @@ else
       AddUserAddress(Address);
       If StoreShares then CreditFrequency(ThisDiff);
       Inc(SESSION_Shares);
-      //UpdateServerInfo := true;
       if ThisDiff<MainBestDiff then
          begin
          ThisSolution.Hash:=Share;
@@ -1148,6 +1160,29 @@ else
       end;
    end;
 End;
+
+{$ENDREGION}
+
+{$REGION Block solution}
+
+Procedure SetSolution(Data:TSolution);
+Begin
+EnterCriticalSection(CS_Solution);
+BestPoolSolution := Data;
+if BestPoolSolution.Diff = '' then BestPoolSolution.Diff := 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+LeaveCriticalSection(CS_Solution);
+End;
+
+Function GetSolution():TSolution;
+Begin
+EnterCriticalSection(CS_Solution);
+Result := BestPoolSolution;
+LeaveCriticalSection(CS_Solution);
+End;
+
+{$ENDREGION}
+
+{$REGION Logs management}
 
 // Prepare logs files
 Function ResetLogs():boolean;
@@ -1197,6 +1232,33 @@ EXCEPT ON E:EXCEPTION do
 END {TRY};
 End;
 
+Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
+Begin
+if ShowOnScreen = uToFile then
+   begin
+   Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
+   RawToLogFile(copy(Texto,2, length(texto)))
+   end
+else if ShowOnScreen = uToConsole then
+   begin
+   EnterCriticalSection(CS_LogLines);
+   Insert(Texto,LogLines,Length(LogLines));
+   LeaveCriticalSection(CS_LogLines);
+   end
+else
+   begin
+   Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
+   RawToLogFile(copy(Texto,2, length(texto)));
+   EnterCriticalSection(CS_LogLines);
+   Insert(Texto,LogLines,Length(LogLines));
+   LeaveCriticalSection(CS_LogLines);
+   end;
+End;
+
+{$ENDREGION}
+
+{$REGION User config management}
+
 // Creates/saves config data
 Function SaveConfig():boolean;
 Begin
@@ -1215,7 +1277,6 @@ writeln(configfile,'ipminers '+IntToStr(IPMiners));
 writeln(configfile,'autostart '+BoolToStr(PoolAuto,True));
 writeln(configfile,'autodiff '+BoolToStr(AutoDiff,True));
 writeln(configfile,'autovalue '+IntToStr(AutoValue));
-writeln(configfile,'locked '+LockedAddressesString);
 writeln(configfile,'donate '+PoolDonate.ToString);
 writeln(configfile,'amipass '+AMIPass);
 
@@ -1255,7 +1316,6 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'AUTOSTART' then PoolAuto := StrToBool(Parameter(linea,1));
    if uppercase(Parameter(linea,0)) = 'AUTODIFF' then AutoDiff := StrToBool(Parameter(linea,1));
    if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then AutoValue := StrToIntDef(Parameter(linea,1),AutoValue);
-   if uppercase(Parameter(linea,0)) = 'LOCKED' then LockedAddressesString := Parameter(linea,1);
    if uppercase(Parameter(linea,0)) = 'DONATE' then PoolDonate := StrToIntDef(Parameter(linea,1),PoolDonate);
    if uppercase(Parameter(linea,0)) = 'AMIPASS' then AMIPass := Parameter(linea,1);
    if PoolDonate>99 then PoolDonate := 99;
@@ -1276,6 +1336,10 @@ EXCEPT ON E:EXCEPTION do
 END {TRY};
 End;
 
+{$ENDREGION}
+
+{$REGION Screen refresh}
+
 Function UpdateScreen():Boolean;
 Begin
 EnterCriticalSection(CS_UpdateScreen);
@@ -1290,6 +1354,10 @@ EnterCriticalSection(CS_UpdateScreen);
 RefreshScreen := True;
 LeaveCriticalSection(CS_UpdateScreen);
 End;
+
+{$ENDREGION}
+
+{$REGION SERVER}
 
 Procedure InitServer();
 Begin
@@ -1332,27 +1400,6 @@ If success then
    end;
 End;
 
-Function UpTime():string;
-var
-  TotalSeconds,days,hours,minutes,seconds, remain : integer;
-Begin
-if SESSION_Started = 0 then
-   begin
-   Result := '00:00:00';
-   exit;
-   end;
-Totalseconds := UTCTime-SESSION_Started;
-Days := Totalseconds div 86400;
-remain := Totalseconds mod 86400;
-hours := remain div 3600;
-remain := remain mod 3600;
-minutes := remain div 60;
-remain := remain mod 60;
-seconds := remain;
-if Days > 0 then Result:= Format('%dd %.2d:%.2d:%.2d', [Days, Hours, Minutes, Seconds])
-else Result:= Format('%.2d:%.2d:%.2d', [Hours, Minutes, Seconds]);
-End;
-
 Function StopPool():String;
 Var
   Success: boolean = false;
@@ -1376,50 +1423,9 @@ If success then
    end;
 End;
 
-Function GetDiffHashrate(bestdiff:String):integer;
-var
-  counter:integer = 0;
-Begin
-repeat
-  counter := counter+1;
-until bestdiff[counter]<> '0';
-Result := (Counter-1)*100;
-if bestdiff[counter]='1' then Result := Result+50;
-if bestdiff[counter]='2' then Result := Result+25;
-if bestdiff[counter]='3' then Result := Result+12;
-if bestdiff[counter]='4' then Result := Result+6;
-End;
+{$ENDREGION}
 
-Function GetSessionSpeed(): int64;
-var
-  seconds : integer;
-Begin
-Seconds := UTCTime-SESSION_Started;
-Result := (SESSION_HashPerShare*SESSION_Shares) div (seconds+1);
-End;
-
-Procedure ToLog(Texto:string;ShowOnScreen:integer = 0);
-Begin
-if ShowOnScreen = uToFile then
-   begin
-   Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
-   RawToLogFile(copy(Texto,2, length(texto)))
-   end
-else if ShowOnScreen = uToConsole then
-   begin
-   EnterCriticalSection(CS_LogLines);
-   Insert(Texto,LogLines,Length(LogLines));
-   LeaveCriticalSection(CS_LogLines);
-   end
-else
-   begin
-   Texto := copy(Texto,1,1)+TimeToStr(now)+' '+copy(Texto,2, length(texto));
-   RawToLogFile(copy(Texto,2, length(texto)));
-   EnterCriticalSection(CS_LogLines);
-   Insert(Texto,LogLines,Length(LogLines));
-   LeaveCriticalSection(CS_LogLines);
-   end;
-End;
+{$REGION Block best}
 
 Function GetBlockBest():String;
 Begin
@@ -1443,30 +1449,32 @@ ThisBlockBestAddress := LAddress;
 LeaveCriticalSection(CS_BlockBest);
 End;
 
+{$ENDREGION}
+
 Procedure CreditDonationToDeveloper(Amount:int64);
 var
   Counter  : integer;
   Found    : boolean = false;
-  NewMiner : TMinersData;
+  NewMiner : TMinersDataNew;
 Begin
 EnterCriticalSection(CS_Miners);
-For counter := 0 to length(ArrMiners)-1 do
+For counter := 0 to length(ArrMinersNew)-1 do
    begin
-   if ArrMiners[counter].address =DeveloperAddress then
+   if ArrMinersNew[counter].address =DeveloperAddress then
       begin
-      ArrMiners[counter].Balance:=ArrMiners[counter].Balance+Amount;
+      Inc(ArrMinersNew[counter].Balance,amount);
       Found := true;
       Break;
       end;
    end;
 If not found then
    begin
-   NewMiner := Default(TMinersData);
+   NewMiner := Default(TMinersDataNew);
    NewMiner.address:=DeveloperAddress;
    NewMiner.Shares:=0;
    NewMiner.Balance:=Amount;
    NewMiner.LastPay:=GetMainConsensus.block;
-   Insert(NewMiner,ArrMiners,Length(ArrMiners));
+   Insert(NewMiner,ArrMinersNew,Length(ArrMinersNew));
    end;
 LEaveCriticalSection(CS_Miners);
 ToLog(' Donated to dev: '+Int2curr(amount));
@@ -1476,26 +1484,26 @@ Procedure CreditFundsToProject(Amount:int64);
 var
   Counter  : integer;
   Found    : boolean = false;
-  NewMiner : TMinersData;
+  NewMiner : TMinersDataNew;
 Begin
 EnterCriticalSection(CS_Miners);
-For counter := 0 to length(ArrMiners)-1 do
+For counter := 0 to length(ArrMinersNew)-1 do
    begin
-   if ArrMiners[counter].address =ProjectAddress then
+   if ArrMinersNew[counter].address =ProjectAddress then
       begin
-      ArrMiners[counter].Balance:=ArrMiners[counter].Balance+Amount;
+      Inc(ArrMinersNew[counter].Balance,amount);
       Found := true;
       Break;
       end;
    end;
 If not found then
    begin
-   NewMiner := Default(TMinersData);
+   NewMiner := Default(TMinersDataNew);
    NewMiner.address:=ProjectAddress;
    NewMiner.Shares:=0;
    NewMiner.Balance:=Amount;
    NewMiner.LastPay:=GetMainConsensus.block;
-   Insert(NewMiner,ArrMiners,Length(ArrMiners));
+   Insert(NewMiner,ArrMinersNew,Length(ArrMinersNew));
    end;
 LEaveCriticalSection(CS_Miners);
 //ToLog(' Credited to project: '+Int2curr(amount));
@@ -1518,15 +1526,15 @@ ToDistribute := BaseReward;
 Comision := (ToDistribute * PoolFee) div 10000;
 ToDistribute := ToDistribute - Comision;
 EnterCriticalSection(CS_Miners);
-For counter := 0 to length(ArrMiners)-1 do
-   TotalShares := TotalShares+ArrMiners[counter].Shares;
+For counter := 0 to length(ArrMinersNew)-1 do
+   TotalShares := TotalShares+ArrMinersNew[counter].Shares;
 PerShare := ToDistribute div TotalShares;
-For counter := 0 to length(ArrMiners)-1 do
+For counter := 0 to length(ArrMinersNew)-1 do
    begin
-   if ArrMiners[counter].Shares>0 then
+   if ArrMinersNew[counter].Shares>0 then
       begin
-      ArrMiners[counter].Balance:=ArrMiners[counter].Balance+((ArrMiners[counter].Shares * PerShare));
-      ArrMiners[counter].Shares := 0;
+      ArrMinersNew[counter].Balance:=ArrMinersNew[counter].Balance+((ArrMinersNew[counter].Shares * PerShare));
+      ArrMinersNew[counter].Shares := 0;
       end;
    end;
 LeaveCriticalSection(CS_Miners);
@@ -1541,18 +1549,12 @@ if (PerShare*TotalShares)+Earned <> BaseReward then
    ToLog(Format(' Error on distribution: %d',[BaseReward-(PerShare*TotalShares)]));
 End;
 
-function IsLockedAddress(LAddress:String):boolean;
-Begin
-Result := false;
-if AnsiContainsStr(LockedAddressesString,LAddress) then result := true;
-End;
-
 Procedure RunPayments();
 var
   ThisBlock       : integer;
   counter         : integer;
   ThisThread      : ThreadPayment;
-  CopyArray       : Array of TMinersData ;
+  CopyArray       : Array of TMinersDataNew;
   PayingAddresses : integer = 0;
   TotalToPay      : int64 = 0;
   AddressList     : string = '';
@@ -1565,19 +1567,13 @@ ThisBlock := GetMainConsensus.block;
 SetLength(CopyArray,0);
 SetPayThreads(0, '');
 EnterCriticalSection(CS_Miners);
-CopyArray := copy(ArrMiners,0,length(ArrMiners));
+CopyArray := copy(ArrMinersNew,0,length(ArrMinersNew));
 LeaveCriticalSection(CS_Miners);
 For counter := 0 to length(CopyArray)-1 do
    begin
    if ((CopyArray[counter].Balance>onenoso)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and
        (CopyArray[counter].address<>PoolAddress) )then
       begin
-      if IsLockedAddress(CopyArray[counter].address) then
-         begin
-         CopyArray[counter].LastPay := ThisBlock;
-         ToLog(Format('.BLOCKED payment of %s to Address : %s',[Int2Curr(CopyArray[counter].Balance),CopyArray[counter].address]));
-         continue;
-         end;
       Inc(PayingAddresses);
       AddressList := AddressList+' '+CopyArray[counter].address;
       TotalToPay := TotalToPay + CopyArray[counter].Balance;
@@ -1649,7 +1645,7 @@ End;
 
 Procedure GenerateReport(destination:integer);
 var
-  CopyArray, finalArray : Array of TMinersData ;
+  CopyArray, finalArray : Array of TMinersDataNew ;
   counter, counter2   : integer;
   Inserted : boolean;
   ReportFile : TextFile;
@@ -1660,7 +1656,7 @@ Begin
 SetLength(CopyArray,0);
 SetLength(finalArray,0);
 EnterCriticalSection(CS_Miners);
-CopyArray := copy(ArrMiners,0,length(ArrMiners));
+CopyArray := copy(ArrMinersNew,0,length(ArrMinersNew));
 LeaveCriticalSection(CS_Miners);
 for counter := 0 to length(CopyArray)-1 do
    begin
@@ -1890,29 +1886,7 @@ Insert(GetMainConsensus.LBMiner,ArrayMiner,length(ArrayMiner));
 ThisBlockMNs := false;
 Delete(ArrayMiner,0,1);
 GetBlocksMinedByPool;
-if AutoDiff then
-   begin
-   if TotalShares<AutoValue then
-      begin
-      {
-      Setlength(MinDiffBase,length(MinDiffBase)-1);
-      MinerDiff := AddCharR('F',MinDiffBase,32);
-      SaveConfig;
-      RefreshPoolHeader := true;
-      SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
-      }
-      end;
-   if TotalShares>AutoValue*16 then
-      begin
-      {
-      MinDiffBase := MinDiffBase+'0';
-      MinerDiff := AddCharR('F',MinDiffBase,32);
-      SaveConfig;
-      RefreshPoolHeader := true;
-      SESSION_HashPerShare := Round(Power(16,GetDiffHashrate(MinerDiff)/100));
-      }
-      end;
-   end;
+
 End;
 
 Procedure ResetBlock();
@@ -2259,6 +2233,8 @@ if Address <> '' then
 LeaveCriticalSection(CS_PayThreads);
 End;
 
+{$REGION Pool balance}
+
 Procedure SetPoolBalance(ThisValue:int64);
 Begin
 EnterCriticalSection(CS_PoolBalance);
@@ -2274,14 +2250,7 @@ Result := PoolBalance;
 LeaveCriticalSection(CS_PoolBalance);
 End;
 
-Procedure UpdatePoolBalance();
-var
-  ThisThread : ThreadUpdateBalance;
-Begin
-ThisThread := ThreadUpdateBalance.Create(true);
-ThisThread.FreeOnTerminate:=true;
-ThisThread.Start;
-End;
+{$ENDREGION}
 
 Procedure SetLastBlockRate(ThisValue:int64);
 Begin
@@ -2425,7 +2394,7 @@ Begin
 SetLength(ArraySols,0);
 SetLEngth(ArrayMiner,0);
 LastBlock := GetMyLastUpdatedBlock;
-for counter := LastBlock-99 to LastBlock do
+for counter := LastBlock-143 to LastBlock do
    begin
    ThisBlockDiff := GetBlockValue(counter,'SolDiff');
    if thisblockDiff = '' then thisblockDiff := DefWorst;
@@ -2745,28 +2714,7 @@ else
    end;
 End;
 
-// Debug
-
-Procedure RunTest();
-var
-  LFile : TextFile;
-  Fiop  : boolean = false;
-Begin
-{
-Assignfile(LFile,'test.dat');
-TRY
-   TRY
-   Reset(LFile);
-   Fiop := true;
-   {do stuff with file}
-   EXCEPT ON E:Exception do
-      ToLog(' Test Error');
-   END;
-FINALLY
-if Fiop then CloseFile(LFile);
-END;
-}
-End;
+{$REGION ami}
 
 Procedure ClearAMI();
 Begin
@@ -2901,7 +2849,9 @@ END; {TRY}
 
 End;
 
-// Thor filtering functions
+{$ENDREGION}
+
+// Tor filtering functions
 
 Function GetTorNodesFile():boolean;
 var

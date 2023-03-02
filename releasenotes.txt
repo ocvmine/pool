@@ -1,5 +1,6 @@
-Version 0.74
+Version 0.75
 
-- Removed deprecated balances.
-- Abandoned balance credited to NPrjectPrtcRandmJacptE5.
-- VPNsBlocksLife set to 24.
+- Implemented new miners dat file.
+- Removed thread to verify address balance.
+- Pool mined blocks calculation increased to last 144.
+- Removed locked addresses feature.

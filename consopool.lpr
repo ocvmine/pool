@@ -108,7 +108,7 @@ if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
    write(Format(' %s  %d  %d[%d] %s [%s] [%d] [PT:%d][TOR:%d][VPN:%d]',
-   [UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, HashrateToShow(GetSessionSpeed),
+   [UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, 'NULL',
    HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount,VPNCount]));
    PrintLine(7);
    RefreshUpTime := UTCTime;
@@ -270,49 +270,16 @@ For counter := 0 to LengthNodes-1 do
 
 End;
 
-Procedure LockAddress(LAddress:string);
-Begin
-if AnsiContainsStr(LockedAddressesString,LAddress) then
-   rawtoconsole(' Address already locked')
-else
-   begin
-   rawtoconsole('.Address locked: '+Laddress);
-   LockedAddressesString := LockedAddressesString+LAddress;
-   SaveConfig();
-   end;
-End;
-
-Procedure UnlockAddress(LAddress:string);
-Begin
-if AnsiContainsStr(LockedAddressesString,LAddress) then
-   begin
-   LockedAddressesString := StringReplace(LockedAddressesString,LAddress,'',[rfReplaceAll, rfIgnoreCase]);
-   rawtoconsole(',Address unlocked: '+LAddress);
-   SaveConfig();
-   end
-else rawtoconsole(' Address is not locked');
-End;
-
-Procedure ClearAddress(LAddress:String);
-Begin
-if AnsiContainsStr(LockedAddressesString,LAddress) then
-   begin
-   ClearAddressBalance(LAddress,'Cleared');
-   rawtoconsole('.Address cleared: '+Laddress);
-   end
-else rawtoconsole(' Address is not locked. You need lock first an address before clear it.');
-End;
-
 Procedure ShowBlockShares();
 Var
   Counter : integer;
-  ThisMiner : TMinersData;
+  ThisMiner : TMinersDataNew;
 Begin
 RawToConsole(',Block shares: ');
 EnterCriticalSection(CS_Miners);
-For counter := 0 to Length(ArrMiners)-1 do
+For counter := 0 to Length(ArrMinersNew)-1 do
    begin
-   ThisMiner := ArrMiners[Counter];
+   ThisMiner := ArrMinersNew[Counter];
    RawToConsole(Format(' %0:-40s %12s %5s %d',[ThisMiner.address,Int2Curr(ThisMiner.Balance),
                          ThisMiner.Shares.ToString,ThisMiner.LastPay+poolpay-MainConsensus.block]));
    end;
@@ -436,7 +403,7 @@ InitCriticalSection(CS_Activepays);
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
-SetLength(ArrMiners,0);
+SetLength(ArrMinersNew,0);
 SetLength(ArrShares,0);
 SetLength(ConsoleLines,0);
 SetLength(UserMiner,0);
@@ -448,17 +415,20 @@ SetLength(ARRAY_MinersIPs,0);
 SetLength(ARRAy_VPNIPs,0);
 SLTor := TStringlist.Create;
 
-ClrScr;
 if not directoryexists('logs') then createdir('logs');
 if not directoryexists('miners') then createdir('miners');
 if not directoryexists('blocks') then createdir('blocks');
 if not directoryexists('addresses') then createdir('addresses');
 if not directoryexists('ami') then createdir('ami');
 AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
+AssignFile(MinersFileNew,'miners'+DirectorySeparator+'minersnew.dat');
 Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
 Assignfile(VPNIPsFile,'vpns.dat');
+
+// Migrate the old miners data file
+if fileExists('miners'+DirectorySeparator+'miners.dat') then MigrateMinersFile();
 
 if not FileExists('blocks'+DirectorySeparator+'0.txt') then CreateBlockzero();
 if not fileExists('payments.txt') then createPaymentsFile;
@@ -467,7 +437,7 @@ if not fileExists('frequency.dat') then SaveShareIndex;
 if not fileExists('vpns.dat') then CreateVPNfile;
 if StoreShares then LoadShareIndex;
 Assignfile(PaysFile,'payments.txt');
-if not FileExists('miners'+DirectorySeparator+'miners.dat') then CreateMinersFile();
+if not FileExists('miners'+DirectorySeparator+'minersnew.dat') then CreateMinersFile();
 LoadMiners();
 If not ResetLogs then
    begin
@@ -476,9 +446,14 @@ If not ResetLogs then
    end;
 if not FileExists('consopool.cfg') then SaveConfig();
 LoadConfig();
+writeln('Config loaded');
 LoadVPNFile;
+writeln('VPN file loaded');
 LoadNodes(GetNodesFileData());
+writeln('Nodes loaded');
 InitServer;
+writeln('TCP server initialized');
+ClrScr;
 
 if PoolAddress='' then CloseTheApp('Pool address is empty');
 if PublicKey  ='' then CloseTheApp('Public key is empty');
@@ -656,9 +631,6 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(8,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(8,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
-      else if Uppercase(Parameter(Command,0)) = 'LOCK' then LockAddress(Parameter(Command,1))
-      else if Uppercase(Parameter(Command,0)) = 'UNLOCK' then UnlockAddress(Parameter(Command,1))
-      else if Uppercase(Parameter(Command,0)) = 'CLEARADDRESS' then ClearAddress(Parameter(Command,1))
       else if Uppercase(Parameter(Command,0)) = 'STATUS' then
          begin
          RawToConsole(',Status');
@@ -689,7 +661,6 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'MAINREPORT' then GenerateReport(uToConsole)
       else if Uppercase(Parameter(Command,0)) = 'REPORT' then CounterReport(command,uToConsole)
       else if Uppercase(Parameter(Command,0)) = 'CLS' then ClearPanel
-      else if Uppercase(Parameter(Command,0)) = 'TEST' then RunTest
       else if Uppercase(Parameter(Command,0)) = 'BALANCE' then
          begin
          ToLog(Format(',Summary : %s',[Int2Curr(GetAddressBalanceFromSumary(PoolAddress))]));
