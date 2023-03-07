@@ -33,6 +33,13 @@ Type
      constructor Create(const CreatePaused: Boolean; TAddress:string);
    end;
 
+  ThreadVPNs = class(TThread)
+   protected
+     procedure Execute; override;
+   public
+     constructor Create(const CreatePaused: Boolean);
+   end;
+
   PoolServerEvents = class
     class procedure OnExecute(AContext: TIdContext);
     class procedure OnConnect(AContext: TIdContext);
@@ -90,6 +97,7 @@ Procedure CreateVPNfile();
 Procedure LoadVPNFile();
 Procedure SaveVPNFile();
 Procedure createNodesFile();
+Procedure Createcclassesfile;
 Function GetNodesFileData():String;
 function SaveMnsToDisk(lineText:string): boolean;
 function GetMyLastUpdatedBlock():int64;
@@ -127,6 +135,7 @@ Function GetBlockBest():String;
 Function GetBlockBestAddress():String;
 Procedure SetBlockBest(ThisValue:String; Laddress: string);
 Procedure CreditDonationToDeveloper(Amount:int64);
+Procedure LoadCClasses;
 Procedure CreditFundsToProject(Amount:int64);
 Function DistributeBlockPayment():string;
 Procedure RunPayments();
@@ -135,6 +144,7 @@ Procedure GenerateReport(destination:integer);
 Procedure CounterReport(linea:String;Destination:integer);
 Procedure BuildNewBlock();
 Procedure ResetBlock();
+Procedure RunVPNsThread;
 Function GetPrefixIndex():Integer;
 Procedure ResetPrefixIndex();
 function GetPrefixStr(IndexValue:integer = -1):string;
@@ -358,6 +368,30 @@ VAR
   CS_Activepays      : TRTLCriticalSection;
 
 IMPLEMENTATION
+
+{$REGION VPNs thread}
+
+constructor ThreadVPNs.Create(const CreatePaused: Boolean);
+Begin
+inherited Create(CreatePaused);
+FreeOnTerminate := True;
+End;
+
+procedure ThreadVPNs.Execute;
+Begin
+if not VPNsThreadRunning then
+   begin
+   VPNsThreadRunning := true;
+   ToLog(',VPN thread Started!');
+   ProcessNewVPNs(GetVPNBanList);
+   RunVPNClean(GetMainConsensus.block);
+   SaveVPNFile;
+   VPNsThreadRunning := false;
+   ToLog(',VPN thread Ended!');
+   end;
+End;
+
+{$ENDREGION}
 
 {$REGION Payment thread}
 
@@ -794,6 +828,24 @@ CloseFile(ThisFile);
 EXCEPT ON E:EXCEPTION do
    begin
    ToLog(' Error creating nodes file');
+   Halt(1);
+   end;
+END {TRY};
+previousNodes := DefaultNodes;
+End;
+
+Procedure Createcclassesfile;
+var
+  ThisFile : TextFile;
+Begin
+AssignFile(ThisFile,'cclasses.dat');
+TRY
+rewrite(ThisFile);
+write(ThisFile,DefaultCclasses);
+CloseFile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   begin
+   ToLog(' Error creating CClasses file');
    Halt(1);
    end;
 END {TRY};
@@ -1451,6 +1503,16 @@ End;
 
 {$ENDREGION}
 
+Procedure LoadCClasses;
+var
+  ThisFile : TextFile;
+Begin
+AssignFile(ThisFile,'cclasses.dat');
+Reset(ThisFile);
+ReadLn(ThisFile, DefaultCclasses);
+Closefile(ThisFile);
+End;
+
 Procedure CreditDonationToDeveloper(Amount:int64);
 var
   Counter  : integer;
@@ -1886,7 +1948,6 @@ Insert(GetMainConsensus.LBMiner,ArrayMiner,length(ArrayMiner));
 ThisBlockMNs := false;
 Delete(ArrayMiner,0,1);
 GetBlocksMinedByPool;
-
 End;
 
 Procedure ResetBlock();
@@ -1922,11 +1983,22 @@ GetTorExitNodesFile();
 LoadTorNodes();
 TorCOunt := 0;
 VPNCount := 0;
+CCBlocked := 0;
 ResetTorAllowed;
 ResetTorBlocked;
-ProcessNewVPNs(GetVPNBanList);
-RunVPNClean(GetMainConsensus.block);
-SaveVPNFile;
+RunVPNsThread;
+//ProcessNewVPNs(GetVPNBanList);
+//RunVPNClean(GetMainConsensus.block);
+//SaveVPNFile;
+End;
+
+Procedure RunVPNsThread;
+var
+  ThisThread : ThreadVPNs;
+Begin
+ThisThread := ThreadVPNs.create(true);
+ThisThread.FreeOnTerminate:=true;
+ThisThread.Start;
 End;
 
 Function GetPrefixIndex():Integer;
@@ -2024,6 +2096,12 @@ Begin
 // IMPLEMENT TIME FILTER WITH BLOCKAGE
 RawIP := AContext.Connection.Socket.Binding.PeerIP;
 IPUser := GetIpFiltered(RawIP);
+If AnsiContainsStr(DefaultCClasses,IPUser) then
+   begin
+   TryClosePoolConnection(AContext,'UNEXPECTED_PLEASE_REPORT');
+   Inc(CCBlocked);
+   exit;
+   end;
 Linea := '';
 TRY
 Linea := AContext.Connection.IOHandler.ReadLn('',3000,-1,IndyTextEncoding_UTF8);
@@ -2991,8 +3069,10 @@ Function GetVPNBanList():String;
 var
   readedLine : string = '';
   Conector : TFPHttpClient;
+  InitTime  : int64;
 Begin
 Result := '';
+InitTime := GetTickCount64;
 Conector := TFPHttpClient.Create(nil);
 conector.ConnectTimeout:=3000;
 conector.IOTimeout:=3000;
@@ -3013,6 +3093,7 @@ if readedline <> '' then
    end;
 Result := readedline;
 Conector.Free;
+ToLog(Format('.VPNs download time: %d ms',[GetTickCount64-InitTime]));
 End;
 
 Procedure ProcessNewVPNs(VPNsList:String);
@@ -3021,7 +3102,9 @@ var
   Counter   : integer = 0;
   Included  : Integer = 0;
   Processed : integer = 0;
+  InitTime  : int64;
 Begin
+InitTime := GetTickCount64;
 Repeat
    ThisIP := Parameter(VPNsList,counter);
    if ThisIP <> '' then
@@ -3031,6 +3114,7 @@ Repeat
       end;
    Inc(Counter);
 until ThisIP = '';
+ToLog(Format(',VPNs Process time: %d ms',[GetTickCount64-InitTime]));
 ToLog(' VPNs procecessed: '+Processed.ToString);
 If Included > 0 then ToLog('.New VPN IPs: '+Included.ToString);
 End;
