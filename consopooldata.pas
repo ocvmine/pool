@@ -11,6 +11,17 @@ USES
 
 Type
 
+  TSourceData = packed record
+    address  : string[40];
+    IP       : string[15];
+    classA   : integer;
+    Classb   : integer;
+    ClassC   : integer;
+    ClassD   : integer;
+    Password : string[32];
+    LastBlock: integer;
+    end;
+
   SumaryData = Packed Record
     Hash    : String[40];
     Custom  : String[40];
@@ -80,6 +91,8 @@ Type
     IP           : String[15];
     Block        : integer;
     end;
+
+   TSourcesArray = Array[0..255] of integer;
 
 
 Procedure AddPaymentToFile(Block,destino,monto,OrderID:String);
@@ -217,10 +230,15 @@ Procedure ClearActivePays();
 Procedure DecActivePays();
 Procedure IncActivePays();
 function ActivePaysCount():integer;
+// Array Sources
+Procedure ResetArraySources();
+Procedure AddNewRecord(Address, password,IP:String;Block:Integer);
+Procedure OutputSourcesToFile();
+
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.75';
+  AppVersion = 'v0.76';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -238,6 +256,10 @@ CONST
 
 
 VAR
+  // Array of sources to new PoPW format
+  ArraySources : array of TSourceData;
+  ClassAcount  : array[0..255] of integer;
+  ClassBCount  : array[0..255] of TSourcesArray;
   // Like a CONST
   StoreShares : boolean = False;
   // Counters
@@ -366,6 +388,8 @@ VAR
   CS_VPNIPs          : TRTLCriticalSection;
   // Active threads paying
   CS_Activepays      : TRTLCriticalSection;
+  // Array Sources
+  CS_ArrSources      : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -382,12 +406,16 @@ Begin
 if not VPNsThreadRunning then
    begin
    VPNsThreadRunning := true;
+   TRY
    ToLog(',VPN thread Started!');
    ProcessNewVPNs(GetVPNBanList);
    RunVPNClean(GetMainConsensus.block);
    SaveVPNFile;
-   VPNsThreadRunning := false;
    ToLog(',VPN thread Ended!');
+   EXCEPT ON E:Exception do
+     ToLog(',CRITICAL ThreadVPNs: '+e.Message);
+   END;
+   VPNsThreadRunning := false;
    end;
 End;
 
@@ -878,6 +906,7 @@ var
   counter : integer;
 Begin
 EnterCriticalSection(CS_VPNIPs);
+TRY
 rewrite(VPNIPsFile);
 For counter := 0 to length(ARRAy_VPNIPs)-1 do
    begin
@@ -885,6 +914,9 @@ For counter := 0 to length(ARRAy_VPNIPs)-1 do
    end;
 CloseFile(VPNIPsFile);
 ToLog(' Saved VPNs: '+IntToStr(length(ARRAy_VPNIPs)));
+EXCEPT ON E:Exception do
+  ToLog('.CRITICAL SaveVPNFile: '+e.Message);
+END;
 LeaveCriticalSection(CS_VPNIPs);
 End;
 
@@ -1987,6 +2019,8 @@ CCBlocked := 0;
 ResetTorAllowed;
 ResetTorBlocked;
 RunVPNsThread;
+OutputSourcesToFile;
+ToLog(',Sources output completed');
 //ProcessNewVPNs(GetVPNBanList);
 //RunVPNClean(GetMainConsensus.block);
 //SaveVPNFile;
@@ -2122,6 +2156,7 @@ Address := Parameter(Linea,1);
 If UpperCase(Command) = 'SOURCE' then
    begin
    AddUserMiner(Parameter(Linea,2));
+   AddNewRecord(Address,Parameter(Linea,3),RawIP,GetMainConsensus.block);
    //AddUserIP(IPUser);
    if ( (not IsValidHashAddress(Address)) or (address = '') ) then
       begin
@@ -2135,7 +2170,8 @@ If UpperCase(Command) = 'SOURCE' then
       MinTill:= StrToIntDef(Parameter(MinerData,1),0);
       MinPay := Parameter(MinerData,2);
       // 1{MinerPrefix} 2{MinerAddress} 3{PoolMinDiff} 4{LBHash} 5{LBNumber} 6{MinerBalance}
-      // 7{TillPayment} 8{LastPayInfo} 9{LastBlockPoolHashrate} {10}MainnetHashRate {11}PoolFee 12{PoolUTCTime}
+      // 7{TillPayment} 8{LastPayInfo} 9{LastBlockPoolHashrate} {10}MainnetHashRate
+      //{11}PoolFee 12{PoolUTCTime}
 
       TryClosePoolConnection(AContext,'OK '+{1}GetPrefixStr+' '+
                                             {2}PoolAddress+' '+
@@ -3228,6 +3264,211 @@ Begin
 EnterCriticalSection(CS_Activepays);
 result:= ActivePays;
 LeaveCriticalSection(CS_Activepays);
+End;
+
+// ARRAY SOURCES HANDLING
+
+Function GetClass_A(IP:String):integer;
+Begin
+IP :=  StringReplace(IP,'.',' ',[rfReplaceAll, rfIgnoreCase]);
+Result := StrToIntDef(Parameter(IP,0),0);
+End;
+
+Function GetClass_B(IP:String):integer;
+Begin
+IP :=  StringReplace(IP,'.',' ',[rfReplaceAll, rfIgnoreCase]);
+Result := StrToIntDef(Parameter(IP,1),0);
+End;
+
+Function GetClass_C(IP:String):integer;
+Begin
+IP :=  StringReplace(IP,'.',' ',[rfReplaceAll, rfIgnoreCase]);
+Result := StrToIntDef(Parameter(IP,2),0);
+End;
+
+Function GetClass_D(IP:String):integer;
+Begin
+IP :=  StringReplace(IP,'.',' ',[rfReplaceAll, rfIgnoreCase]);
+Result := StrToIntDef(Parameter(IP,3),0);
+End;
+
+Procedure ResetArraySources();
+Begin
+EnterCriticalSection(CS_ArrSources);
+SetLength(ArraySources,0);
+LeaveCriticalSection(CS_ArrSources);
+End;
+
+Function IsValidRecord(Address, password,IP:String;Block:Integer):boolean;
+var
+  counter : integer;
+Begin
+Result := true;
+EnterCriticalSection(CS_ArrSources);
+for counter := 0 to length(ArraySources)-1 do
+   begin
+   if ArraySources[counter].Address = address then
+      begin
+      if ( (ArraySources[counter].IP = IP) and (ArraySources[counter].Password = password) ) then
+         begin
+         ArraySources[counter].LastBlock:=Block;
+         Result := false;
+         Break;
+         end
+      else if ( (ArraySources[counter].IP <> IP) and (ArraySources[counter].Password = password) ) then
+         begin
+         ArraySources[counter].IP := IP;
+         ArraySources[counter].LastBlock:=Block;
+         Result := false;
+         break;
+         end
+      end;
+   if ArraySources[counter].IP = IP then
+      begin
+      if ArraySources[counter].Address <> address then
+         begin
+         Delete(ArraySources,counter,1);
+         result := false;
+         break;
+         end;
+      end;
+   end;
+LeaveCriticalSection(CS_ArrSources);
+End;
+
+Procedure AddNewRecord(Address, password,IP:String;Block:Integer);
+Begin
+if not IsValidRecord(Address, password, ip, block)then Exit;
+EnterCriticalSection(CS_ArrSources);
+SetLength(ArraySources,length(ArraySources)+1);
+Arraysources[length(ArraySources)-1].address:=Address;
+Arraysources[length(ArraySources)-1].IP:=IP;
+Arraysources[length(ArraySources)-1].Password:=Password;
+Arraysources[length(ArraySources)-1].classA:=GetClass_A(IP);
+Arraysources[length(ArraySources)-1].classB:=GetClass_B(IP);
+Arraysources[length(ArraySources)-1].classC:=GetClass_C(IP);
+Arraysources[length(ArraySources)-1].classD:=GetClass_D(IP);
+Arraysources[length(ArraySources)-1].lastblock := Block;
+LeaveCriticalSection(CS_ArrSources);
+End;
+
+Procedure RestartSourcesCounters();
+var
+  counter,count2 : integer;
+Begin
+for counter := 0 to 255 do
+   begin
+   ClassAcount[counter] := 0;
+   for count2 := 0 to 255 do
+      ClassBCount[counter][count2] := 0;
+   end;
+End;
+
+Procedure CreditToSource(IP:String);
+Begin
+// Class B
+inc(ClassBCount[GetClass_A(IP)][GetClass_B(IP)]);
+// Class A
+if ClassBCount[GetClass_A(IP)][GetClass_B(IP)] = 1 then
+   Inc(ClassAcount[GetClass_A(IP)]);
+End;
+
+Function GetClassBParticipants(ClassA:integer):integer;
+var
+  Counter : integer;
+Begin
+Result := 0;
+for counter := 0 to 255 do
+   inc(result,ClassBCount[ClassA][Counter]);
+End;
+
+Procedure OutputSourcesToFile();
+var
+  ThisFile : textfile;
+  counter,count2  : integer;
+  ThisAddress, ThisIP,ThisPass,ThisBlock : String;
+  ThisLine : string;
+  AClassesCount : integer = 0;
+  LBPowPayment  : int64;
+  MaxPErAddress, MaxPerClassA : int64;
+  TotalThisBlock : integer = 0;
+  CopyArray : array of TSourceData;
+  ThisPayment : int64;
+  TotalPayment : int64 = 0;
+Begin
+RestartSourcesCounters;
+Assignfile(ThisFile,'sources.txt');
+EnterCriticalSection(CS_ArrSources);
+SetLength(CopyArray,0);
+CopyArray := copy(Arraysources,0,length(Arraysources));
+LeaveCriticalSection(CS_ArrSources);
+TRY
+Rewrite(ThisFile);
+writeln(ThisFile,'------------------------------------------------------------------');
+writeln(ThisFile,'List');
+writeln(ThisFile,'------------------------------------------------------------------');
+ThisAddress := format('%0:-40s',['Address']);
+ThisIP      := format('%0:20s',['IP']);
+ThisPass    := format('%0:-20s',['Password']);
+ThisBlock   := format('%0:10s',['Block']);
+ThisLine := format('%s %s %s %s',[ThisAddress,ThisIP,ThisPass,ThisBlock]);
+writeln(ThisFile,ThisLine);
+for counter := 0 to length(CopyArray)-1 do
+   begin
+   ThisAddress := format('%0:-40s',[CopyArray[counter].address]);
+   ThisIP      := format('%0:20s',[CopyArray[counter].IP]);
+   ThisPass    := format('%0:-20s',[CopyArray[counter].Password]);
+   ThisBlock   := format('%0:10s',[CopyArray[counter].LastBlock.ToString]);
+   ThisLine := format('%s %s %s %s',[ThisAddress,ThisIP,ThisPass,ThisBlock]);
+   if CopyArray[counter].LastBlock >= GetMainConsensus.block-1 then
+      begin
+      Inc(TotalThisBlock);
+      CreditToSource(CopyArray[counter].IP);
+      writeln(ThisFile,ThisLine);
+      end;
+   end;
+// Analisis
+writeln(ThisFile,'------------------------------------------------------------------');
+writeln(ThisFile,'Data');
+writeln(ThisFile,'------------------------------------------------------------------');
+ThisLine := Format('Participants: %d (%d)',[TotalThisBlock,length(CopyArray)]);
+writeln(ThisFile,ThisLine);
+if TotalThisBlock>0 then MaxPerAddress := GetMainConsensus.LBPoW div TotalThisBlock
+else MaxPerAddress := 0;
+ThisLine := 'Max per participant : '+Int2Curr(MaxPerAddress);
+writeln(ThisFile,ThisLine);
+for counter := 0 to 255 do
+   begin
+   if ClassAcount[counter] > 0 then Inc(AClassesCount);
+   end;
+ThisLine := 'Class A count : '+AClassesCount.tostring;
+writeln(ThisFile,ThisLine);
+if TotalThisBlock>0 then MaxPerClassA := GetMainConsensus.LBPoW div AClassesCount
+else MaxPerClassA := 0;
+ThisLine := 'Max per Class A : '+Int2Curr(MaxPerClassA);
+writeln(ThisFile,ThisLine);
+writeln(ThisFile,'------------------------------------------------------------------');
+For counter := 0 to 255 do
+   begin
+   if ClassAcount[counter]>0 then
+      begin
+      ThisLine := Format('Class A %d -> %d B classes -> Participants: %d',[counter,ClassAcount[counter],GetClassBParticipants(counter)]);
+      writeln(ThisFile,ThisLine);
+      end;
+   end;
+for counter := 0 to length(CopyArray)-1 do
+   begin
+   if CopyArray[counter].LastBlock >= GetMainConsensus.block-1 then
+      begin
+      ThisPayment := 0;
+      end;
+   end;
+
+
+Closefile(ThisFile);
+EXCEPT ON E:EXCEPTION do
+   ToLog('.Error on output sources: '+E.Message);
+END;
 End;
 
 END. // End unit

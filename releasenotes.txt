@@ -1,8 +1,3 @@
-Version 0.75
+Version 0.76
 
-- Implemented new miners dat file.
-- Removed thread to verify address balance.
-- Pool mined blocks calculation increased to last 144.
-- Removed locked addresses feature.
-- Added C class filter.
-- Separate thread for vpn process.
+- Array sources included.

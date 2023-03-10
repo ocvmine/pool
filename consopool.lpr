@@ -376,6 +376,7 @@ DoneCriticalSection(CS_TorAllowed);
 DoneCriticalSection(CS_TorBlocked);
 DoneCriticalSection(CS_VPNIPs);
 DoneCriticalSection(CS_Activepays);
+DoneCriticalSection(CS_ArrSources);
 SLTor.Free;
 End;
 
@@ -402,6 +403,8 @@ InitCriticalSection(CS_TorAllowed);
 InitCriticalSection(CS_TorBlocked);
 InitCriticalSection(CS_VPNIPs);
 InitCriticalSection(CS_Activepays);
+InitCriticalSection(CS_ArrSources);
+
 
 SetLength(LogLines,0);
 SetLength(NewLogLines,0);
@@ -415,6 +418,7 @@ SetLength(WrongShareIp,0);
 SetLength(ARRAY_Sumary,0);
 SetLength(ARRAY_MinersIPs,0);
 SetLength(ARRAy_VPNIPs,0);
+ResetArraySources;
 SLTor := TStringlist.Create;
 
 if not directoryexists('logs') then createdir('logs');
@@ -636,6 +640,11 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'RUN' then PrintLine(8,StartPool)
       else if Uppercase(Parameter(Command,0)) = 'STOP' then PrintLine(8,StopPool)
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
+      else if Uppercase(Parameter(Command,0)) = 'SOURCES' then
+         begin
+         OutputSourcesToFile;
+         RawToConsole(',Sources output done!');
+         end
       else if Uppercase(Parameter(Command,0)) = 'STATUS' then
          begin
          RawToConsole(',Status');
