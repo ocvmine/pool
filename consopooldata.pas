@@ -234,6 +234,8 @@ function ActivePaysCount():integer;
 Procedure ResetArraySources();
 Procedure AddNewRecord(Address, password,IP:String;Block:Integer);
 Procedure OutputSourcesToFile();
+Procedure SaveSourcesToDisk();
+Procedure LoadSourcesFromDisk();
 
 
 CONST
@@ -2020,6 +2022,7 @@ ResetTorAllowed;
 ResetTorBlocked;
 RunVPNsThread;
 OutputSourcesToFile;
+SaveSourcesToDisk;
 ToLog(',Sources output completed');
 //ProcessNewVPNs(GetVPNBanList);
 //RunVPNClean(GetMainConsensus.block);
@@ -2130,12 +2133,6 @@ Begin
 // IMPLEMENT TIME FILTER WITH BLOCKAGE
 RawIP := AContext.Connection.Socket.Binding.PeerIP;
 IPUser := GetIpFiltered(RawIP);
-If AnsiContainsStr(DefaultCClasses,IPUser) then
-   begin
-   TryClosePoolConnection(AContext,'UNEXPECTED_PLEASE_REPORT');
-   Inc(CCBlocked);
-   exit;
-   end;
 Linea := '';
 TRY
 Linea := AContext.Connection.IOHandler.ReadLn('',3000,-1,IndyTextEncoding_UTF8);
@@ -2153,6 +2150,7 @@ EXCEPT On E:Exception do
 END{Try};
 Command := Parameter(Linea,0);
 Address := Parameter(Linea,1);
+TRY
 If UpperCase(Command) = 'SOURCE' then
    begin
    AddUserMiner(Parameter(Linea,2));
@@ -2194,6 +2192,12 @@ If UpperCase(Command) = 'SOURCE' then
 else If UpperCase(Command) = 'SHARE' then
    //{1}Addess {2}Share {3}Miner
    begin
+   If AnsiContainsStr(DefaultCClasses,IPUser) then
+      begin
+      TryClosePoolConnection(AContext,'False UNEXPECTED_PLEASE_REPORT');
+      Inc(CCBlocked);
+      exit;
+      end;
    if EnoughSharesByIp(IPUser) then
       begin
       TryClosePoolConnection(AContext,'False SHARES_LIMIT');
@@ -2241,6 +2245,12 @@ else
    begin
    TryClosePoolConnection(AContext,'Unknown :'+Linea);
    end;
+EXCEPT ON E:EXCEPTION DO
+  begin
+  TryClosePoolConnection(AContext,'false ERROR_5001');
+  ToLog('.ERROR 5001: '+E.Message);
+  end;
+END;
 End;
 
 Procedure SendSolution(Data:TSolution);
@@ -3382,6 +3392,14 @@ for counter := 0 to 255 do
    inc(result,ClassBCount[ClassA][Counter]);
 End;
 
+Function GetUserPAyment(IP:String;MaxClassA:int64):int64;
+var
+  TothisBclass : int64;
+Begin
+TothisBclass := MaxClassA div ClassAcount[GetClass_A(IP)];
+Result := TothisBclass div ClassBCount[GetClass_A(IP)][GetClass_B(IP)];
+End;
+
 Procedure OutputSourcesToFile();
 var
   ThisFile : textfile;
@@ -3394,6 +3412,7 @@ var
   TotalThisBlock : integer = 0;
   CopyArray : array of TSourceData;
   ThisPayment : int64;
+  ThisPayShow : string;
   TotalPayment : int64 = 0;
 Begin
 RestartSourcesCounters;
@@ -3456,20 +3475,77 @@ For counter := 0 to 255 do
       writeln(ThisFile,ThisLine);
       end;
    end;
+writeln(ThisFile,'------------------------------------------------------------------');
+writeln(ThisFile,'Payments');
+writeln(ThisFile,'------------------------------------------------------------------');
 for counter := 0 to length(CopyArray)-1 do
    begin
    if CopyArray[counter].LastBlock >= GetMainConsensus.block-1 then
       begin
-      ThisPayment := 0;
+      ThisPayment := GetUserPAyment(CopyArray[counter].IP,MaxPerClassA);
+      if thispayment > MaxPerAddress then ThisPayment := MaxPerAddress;
+      ThisAddress := format('%0:-40s',[CopyArray[counter].address]);
+      ThisIP      := format('%0:20s',[CopyArray[counter].IP]);
+      ThisPayShow := format('%0:-20s',[Int2Curr(ThisPayment)]);
+      ThisLine := format('%s %s %s',[ThisAddress,ThisIP,ThisPayShow]);
+      Inc(TotalPayment,ThisPayment);
+      writeln(ThisFile,ThisLine);
       end;
    end;
-
+writeln(ThisFile,'------------------------------------------------------------------');
+writeln(ThisFile,'Total paid: '+Int2curr(TotalPayment));
 
 Closefile(ThisFile);
 EXCEPT ON E:EXCEPTION do
    ToLog('.Error on output sources: '+E.Message);
 END;
 End;
+
+Procedure LoadSourcesFromDisk();
+var
+  thisfile : file of TSourceData;
+  counter : integer;
+  ThisData : TSourceData;
+Begin
+Assignfile(ThisFile,'sources.dat');
+Setlength(Arraysources,filesize(ThisFile));
+EnterCriticalSection(CS_ArrSources);
+TRY
+reset(Thisfile);
+for counter := 0 to length(Arraysources)-1 do
+   begin
+   seek(thisfile,counter);
+   read(Thisfile,Arraysources[counter]);
+   end;
+closeFile(ThisFile);
+EXCEPT ON E:Exception do
+   begin
+   ToLog('.Error loading sources: '+E.Message);
+   end;
+END;
+LeaveCriticalSection(CS_ArrSources);
+End;
+
+Procedure SaveSourcesToDisk();
+var
+  thisfile : file of TSourceData;
+  counter : integer;
+Begin
+Assignfile(ThisFile,'sources.dat');
+EnterCriticalSection(CS_ArrSources);
+rewrite(Thisfile);
+for counter := 0 to length(Arraysources)-1 do
+   begin
+   seek(thisfile,counter);
+   write(Thisfile,Arraysources[counter]);
+   end;
+closeFile(ThisFile);
+LeaveCriticalSection(CS_ArrSources);
+End;
+
+
+
+
 
 END. // End unit
 

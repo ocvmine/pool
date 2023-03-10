@@ -352,6 +352,7 @@ if mensaje<>'' then
 writeLn('ConsoPool Properly CLosed');
 saveminers;
 SaveConfig();
+SaveSourcesToDisk;
 Poolserver.Active:=false;
 PoolServer.Free;
 DoneCriticalSection(CS_UpdateScreen);
@@ -459,6 +460,7 @@ writeln('VPN file loaded');
 LoadNodes(GetNodesFileData());
 writeln('Nodes loaded');
 LoadCClasses;
+LoadSourcesFromDisk;
 InitServer;
 writeln('TCP server initialized');
 ClrScr;
