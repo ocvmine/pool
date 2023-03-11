@@ -3508,10 +3508,10 @@ var
   ThisData : TSourceData;
 Begin
 Assignfile(ThisFile,'sources.dat');
-Setlength(Arraysources,filesize(ThisFile));
 EnterCriticalSection(CS_ArrSources);
 TRY
 reset(Thisfile);
+Setlength(Arraysources,filesize(ThisFile));
 for counter := 0 to length(Arraysources)-1 do
    begin
    seek(thisfile,counter);
