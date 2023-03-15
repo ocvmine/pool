@@ -255,7 +255,7 @@ Procedure OutputLastDayBlocks();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.76a';
+  AppVersion = 'v0.76b';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -1561,11 +1561,26 @@ End;
 Procedure LoadCClasses;
 var
   ThisFile : TextFile;
+  ThisLine : string;
 Begin
 AssignFile(ThisFile,'cclasses.dat');
+DefaultCclasses := '';
+TRY
 Reset(ThisFile);
-ReadLn(ThisFile, DefaultCclasses);
+while not eof(thisfile) do
+   begin
+   ReadLn(ThisFile, ThisLine);
+   ThisLine := Trim(ThisLine);
+   DefaultCclasses := DefaultCclasses+ThisLine+' ';
+   end;
 Closefile(ThisFile);
+DefaultCclasses := Trim(DefaultCclasses);
+ToLog(Format(' C classes loaded',[]));
+EXCEPT ON E:Exception do
+   begin
+   ToLog(Format(' Error Loading C classes file: %s',[E.Message]));
+   end;
+END;
 End;
 
 Procedure CreditDonationToDeveloper(Amount:int64);
