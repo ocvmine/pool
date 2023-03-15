@@ -1,3 +1,4 @@
 Version 0.76
 
 - Array sources included.
+- Complete beta sources system implemented.

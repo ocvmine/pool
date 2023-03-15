@@ -378,6 +378,7 @@ DoneCriticalSection(CS_TorBlocked);
 DoneCriticalSection(CS_VPNIPs);
 DoneCriticalSection(CS_Activepays);
 DoneCriticalSection(CS_ArrSources);
+DoneCriticalSection(CS_ArrBlocks);
 SLTor.Free;
 End;
 
@@ -405,6 +406,8 @@ InitCriticalSection(CS_TorBlocked);
 InitCriticalSection(CS_VPNIPs);
 InitCriticalSection(CS_Activepays);
 InitCriticalSection(CS_ArrSources);
+InitCriticalSection(CS_ArrBlocks);
+
 
 
 SetLength(LogLines,0);
@@ -419,6 +422,7 @@ SetLength(WrongShareIp,0);
 SetLength(ARRAY_Sumary,0);
 SetLength(ARRAY_MinersIPs,0);
 SetLength(ARRAy_VPNIPs,0);
+SetLength(ArrBlocks,0);
 ResetArraySources;
 SLTor := TStringlist.Create;
 
@@ -427,6 +431,7 @@ if not directoryexists('miners') then createdir('miners');
 if not directoryexists('blocks') then createdir('blocks');
 if not directoryexists('addresses') then createdir('addresses');
 if not directoryexists('ami') then createdir('ami');
+if not directoryexists('newpopw') then createdir('newpopw');
 AssignFile(MinersFile,'miners'+DirectorySeparator+'miners.dat');
 AssignFile(MinersFileNew,'miners'+DirectorySeparator+'minersnew.dat');
 Assignfile(configfile, 'consopool.cfg');
@@ -461,6 +466,7 @@ LoadNodes(GetNodesFileData());
 writeln('Nodes loaded');
 LoadCClasses;
 LoadSourcesFromDisk;
+LoadArrBlocksFromDisk();
 InitServer;
 writeln('TCP server initialized');
 ClrScr;
@@ -644,7 +650,7 @@ REPEAT
       else if Uppercase(Parameter(Command,0)) = 'SHARES' then ShowBlockShares
       else if Uppercase(Parameter(Command,0)) = 'SOURCES' then
          begin
-         OutputSourcesToFile;
+         OutputSourcesToFile(GetMainConsensus.LBMiner = PoolAddress);
          RawToConsole(',Sources output done!');
          end
       else if Uppercase(Parameter(Command,0)) = 'STATUS' then

@@ -11,6 +11,15 @@ USES
 
 Type
 
+  TBlockRec = packed record
+    blocknumber : integer;
+    Mined       : boolean;
+    PoWIncome   : int64;
+    Paid        : boolean;
+    TotalPaid   : int64;
+    Bounty      : int64;
+    end;
+
   TSourceData = packed record
     address  : string[40];
     IP       : string[15];
@@ -233,14 +242,20 @@ function ActivePaysCount():integer;
 // Array Sources
 Procedure ResetArraySources();
 Procedure AddNewRecord(Address, password,IP:String;Block:Integer);
-Procedure OutputSourcesToFile();
+Procedure OutputSourcesToFile(wasmined:boolean);
 Procedure SaveSourcesToDisk();
 Procedure LoadSourcesFromDisk();
+// Array blocks
+Procedure LoadArrBlocksFromDisk();
+Procedure SaveArrBlocksToFile();
+Procedure UpdateArrayBlocks(ThisRec:TBlockRec);
+Function GetArrayBlocksLast:TBlockRec;
+Procedure OutputLastDayBlocks();
 
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.76';
+  AppVersion = 'v0.76a';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -262,6 +277,10 @@ VAR
   ArraySources : array of TSourceData;
   ClassAcount  : array[0..255] of integer;
   ClassBCount  : array[0..255] of TSourcesArray;
+
+  // Array of block recrods
+  ArrBlocks    : array of TBlockRec;
+
   // Like a CONST
   StoreShares : boolean = False;
   // Counters
@@ -392,6 +411,8 @@ VAR
   CS_Activepays      : TRTLCriticalSection;
   // Array Sources
   CS_ArrSources      : TRTLCriticalSection;
+  // Array blocks
+  CS_ArrBlocks       : TRTLCriticalSection;
 
 IMPLEMENTATION
 
@@ -1985,6 +2006,8 @@ GetBlocksMinedByPool;
 End;
 
 Procedure ResetBlock();
+var
+  BlockDataNew : TBlockRec;
 Begin
 MainBestDiff := DefWorst;
 if GetMainConsensus.block > GetMyLastUpdatedBlock then
@@ -2021,7 +2044,16 @@ CCBlocked := 0;
 ResetTorAllowed;
 ResetTorBlocked;
 RunVPNsThread;
-OutputSourcesToFile;
+BlockDataNew := Default(TBlockRec);
+BlockDataNew.blocknumber:=GetMainConsensus.block;
+BlockDataNEw.Mined:=GetMainConsensus.LBMiner = PoolAddress;
+if GetMainConsensus.LBMiner = PoolAddress then BlockDataNEw.PoWIncome:= GetMainConsensus.LBPoW
+else BlockDataNEw.PoWIncome := 0;
+BlockDataNEw.Paid:=false;
+BlockDataNEw.Bounty:=GetArrayBlocksLast.Bounty;
+BlockDataNEw.TotalPaid:=0;
+UpdateArrayBlocks(BlockDataNew);
+OutputSourcesToFile(GetMainConsensus.LBMiner = PoolAddress);
 SaveSourcesToDisk;
 ToLog(',Sources output completed');
 //ProcessNewVPNs(GetVPNBanList);
@@ -3400,12 +3432,14 @@ TothisBclass := MaxClassA div ClassAcount[GetClass_A(IP)];
 Result := TothisBclass div ClassBCount[GetClass_A(IP)][GetClass_B(IP)];
 End;
 
-Procedure OutputSourcesToFile();
+Procedure OutputSourcesToFile(Wasmined:Boolean);
 var
   ThisFile : textfile;
   counter,count2  : integer;
   ThisAddress, ThisIP,ThisPass,ThisBlock : String;
   ThisLine : string;
+  TotalToDistribute : int64;
+  PoolComision     : int64;
   AClassesCount : integer = 0;
   LBPowPayment  : int64;
   MaxPErAddress, MaxPerClassA : int64;
@@ -3414,9 +3448,11 @@ var
   ThisPayment : int64;
   ThisPayShow : string;
   TotalPayment : int64 = 0;
+  PRevBlockBounty : int64;
+  BlockData : TBlockRec;
 Begin
 RestartSourcesCounters;
-Assignfile(ThisFile,'sources.txt');
+Assignfile(ThisFile,'newpopw/'+inttostr(GetMainConsensus.block)+'.txt');
 EnterCriticalSection(CS_ArrSources);
 SetLength(CopyArray,0);
 CopyArray := copy(Arraysources,0,length(Arraysources));
@@ -3443,16 +3479,32 @@ for counter := 0 to length(CopyArray)-1 do
       begin
       Inc(TotalThisBlock);
       CreditToSource(CopyArray[counter].IP);
-      writeln(ThisFile,ThisLine);
+      //writeln(ThisFile,ThisLine);
       end;
    end;
 // Analisis
 writeln(ThisFile,'------------------------------------------------------------------');
 writeln(ThisFile,'Data');
 writeln(ThisFile,'------------------------------------------------------------------');
+If wasmined then TotalToDistribute := GetMainConsensus.LBPoW
+else TotalToDistribute := 0;
+ThisLine := Format('This Block POW : %s',[Int2Curr(TotalToDistribute)]);
+  writeln(ThisFile,ThisLine);
+if wasmined then PoolComision := (TotalToDistribute * PoolFee) div 10000
+else PoolComision := 0;
+ThisLine := Format('Pool comision : %s',[Int2Curr(PoolComision)]);
+  writeln(ThisFile,ThisLine);
+if wasmined then PRevBlockBounty := GetArrayBlocksLast.Bounty
+else PRevBlockBounty := 0;
+ThisLine := Format('Pool Bounty : %s',[Int2Curr(PRevBlockBounty)]);
+  writeln(ThisFile,ThisLine);
+TotalToDistribute := TotalToDistribute- PoolComision;
+if wasmined then TotalToDistribute := TotalToDistribute + GetArrayBlocksLast.Bounty;
+ThisLine := Format('To distribue: %s ',[Int2Curr(TotalToDistribute)]);
+  writeln(ThisFile,ThisLine);
 ThisLine := Format('Participants: %d (%d)',[TotalThisBlock,length(CopyArray)]);
-writeln(ThisFile,ThisLine);
-if TotalThisBlock>0 then MaxPerAddress := GetMainConsensus.LBPoW div TotalThisBlock
+  writeln(ThisFile,ThisLine);
+if TotalThisBlock>0 then MaxPerAddress := TotalToDistribute div TotalThisBlock
 else MaxPerAddress := 0;
 ThisLine := 'Max per participant : '+Int2Curr(MaxPerAddress);
 writeln(ThisFile,ThisLine);
@@ -3462,7 +3514,7 @@ for counter := 0 to 255 do
    end;
 ThisLine := 'Class A count : '+AClassesCount.tostring;
 writeln(ThisFile,ThisLine);
-if TotalThisBlock>0 then MaxPerClassA := GetMainConsensus.LBPoW div AClassesCount
+if TotalThisBlock>0 then MaxPerClassA := TotalToDistribute div AClassesCount
 else MaxPerClassA := 0;
 ThisLine := 'Max per Class A : '+Int2Curr(MaxPerClassA);
 writeln(ThisFile,ThisLine);
@@ -3472,33 +3524,46 @@ For counter := 0 to 255 do
    if ClassAcount[counter]>0 then
       begin
       ThisLine := Format('Class A %d -> %d B classes -> Participants: %d',[counter,ClassAcount[counter],GetClassBParticipants(counter)]);
-      writeln(ThisFile,ThisLine);
+      //writeln(ThisFile,ThisLine);
       end;
    end;
-writeln(ThisFile,'------------------------------------------------------------------');
-writeln(ThisFile,'Payments');
-writeln(ThisFile,'------------------------------------------------------------------');
-for counter := 0 to length(CopyArray)-1 do
+BlockData := GetArrayBlocksLast;
+if wasmined then
    begin
-   if CopyArray[counter].LastBlock >= GetMainConsensus.block-1 then
+   writeln(ThisFile,'------------------------------------------------------------------');
+   writeln(ThisFile,'Payments');
+   writeln(ThisFile,'------------------------------------------------------------------');
+   for counter := 0 to length(CopyArray)-1 do
       begin
-      ThisPayment := GetUserPAyment(CopyArray[counter].IP,MaxPerClassA);
-      if thispayment > MaxPerAddress then ThisPayment := MaxPerAddress;
-      ThisAddress := format('%0:-40s',[CopyArray[counter].address]);
-      ThisIP      := format('%0:20s',[CopyArray[counter].IP]);
-      ThisPayShow := format('%0:-20s',[Int2Curr(ThisPayment)]);
-      ThisLine := format('%s %s %s',[ThisAddress,ThisIP,ThisPayShow]);
-      Inc(TotalPayment,ThisPayment);
-      writeln(ThisFile,ThisLine);
+      if CopyArray[counter].LastBlock >= GetMainConsensus.block-1 then
+         begin
+         ThisPayment := GetUserPAyment(CopyArray[counter].IP,MaxPerClassA);
+         if thispayment > MaxPerAddress then ThisPayment := MaxPerAddress;
+         ThisAddress := format('%0:-40s',[CopyArray[counter].address]);
+         ThisIP      := format('%0:20s',[CopyArray[counter].IP]);
+         ThisPayShow := format('%0:-20s',[Int2Curr(ThisPayment)]);
+         ThisLine := format('%s %s %s',[ThisAddress,ThisIP,ThisPayShow]);
+         Inc(TotalPayment,ThisPayment);
+         //writeln(ThisFile,ThisLine);
+         end;
       end;
+   writeln(ThisFile,'------------------------------------------------------------------');
+   writeln(ThisFile,'Total paid   : '+Int2curr(TotalPayment));
+   writeln(ThisFile,'Bounty saved : '+Int2curr(TotalToDistribute-TotalPayment));
+   BlockData.TotalPaid:=TotalPayment;
+   BlockData.PoWIncome:=GetMainConsensus.LBPoW-PoolComision;
+   BlockData.Bounty := TotalToDistribute-TotalPayment;
+   UpdateArrayBlocks(BlockData);
+   end
+else
+   begin
+   UpdateArrayBlocks(BlockData);
    end;
-writeln(ThisFile,'------------------------------------------------------------------');
-writeln(ThisFile,'Total paid: '+Int2curr(TotalPayment));
-
 Closefile(ThisFile);
 EXCEPT ON E:EXCEPTION do
    ToLog('.Error on output sources: '+E.Message);
 END;
+OutputLastDayBlocks;
 End;
 
 Procedure LoadSourcesFromDisk();
@@ -3533,6 +3598,7 @@ var
 Begin
 Assignfile(ThisFile,'sources.dat');
 EnterCriticalSection(CS_ArrSources);
+TRY
 rewrite(Thisfile);
 for counter := 0 to length(Arraysources)-1 do
    begin
@@ -3540,12 +3606,128 @@ for counter := 0 to length(Arraysources)-1 do
    write(Thisfile,Arraysources[counter]);
    end;
 closeFile(ThisFile);
+EXCEPT ON E:Exception do
+   begin
+   ToLog('.Error saving  sources: '+E.Message);
+   end;
+END;
 LeaveCriticalSection(CS_ArrSources);
 End;
 
+// Array of blocks
 
+Procedure LoadArrBlocksFromDisk();
+var
+  ThisFile : file of TBlockRec;
+  counter  : integer;
+Begin
+SetLength(ArrBlocks,0);
+if not fileexists('blockslist.dat') then SaveArrBlocksToFile;
+AssignFile(Thisfile,'blockslist.dat');
+EnterCriticalSection(CS_ArrBlocks);
+Reset(ThisFile);
+SetLength(ArrBlocks,filesize(ThisFile));
+for counter := 0 to filesize(Thisfile)-1 do
+   begin
+   seek(thisfile,counter);
+   read(thisfile,ArrBlocks[Counter]);
+   end;
+CloseFile(ThisFile);
+LeaveCriticalSection(CS_ArrBlocks);
+End;
 
+Procedure SaveArrBlocksToFile();
+var
+  ThisFile : file of TBlockRec;
+  counter  : integer;
+Begin
+AssignFile(Thisfile,'blockslist.dat');
+EnterCriticalSection(CS_ArrBlocks);
+Rewrite(ThisFile);
+for counter := 0 to length(ArrBlocks)-1 do
+   begin
+   seek(thisfile,counter);
+   write(thisfile,ArrBlocks[Counter]);
+   end;
+CloseFile(ThisFile);
+LeaveCriticalSection(CS_ArrBlocks);
+end;
 
+Function GetArrayBlocksLast:TBlockRec;
+Begin
+if length(ArrBlocks) < 1 then result := default(TBlockRec)
+else
+   begin
+   EnterCriticalSection(CS_ArrBlocks);
+   result := ArrBlocks[length(ArrBlocks)-1];
+   LeaveCriticalSection(CS_ArrBlocks);
+   end;
+End;
+
+Procedure UpdateArrayBlocks(ThisRec:TBlockRec);
+var
+  counter : integer;
+Begin
+If ThisRec.blocknumber > GetArrayBlocksLast.blocknumber then
+   begin
+   EnterCriticalSection(CS_ArrBlocks);
+   SetLength(ArrBlocks,length(ArrBlocks)+1);
+   ArrBlocks[length(ArrBlocks)-1] := ThisRec;
+   LeaveCriticalSection(CS_ArrBlocks);
+   end
+else
+   Begin
+   EnterCriticalSection(CS_ArrBlocks);
+   for counter := length(ArrBlocks)-1 downto 0 do
+      begin
+      if ArrBlocks[counter].blocknumber = ThisRec.blocknumber then
+         begin
+         ArrBlocks[counter] := ThisRec;
+         Break;
+         end;
+      end;
+   LeaveCriticalSection(CS_ArrBlocks);
+   end;
+SaveArrBlocksToFile;
+End;
+
+Procedure OutputLastDayBlocks();
+var
+  ThisFile  : textfile;
+  counter   : integer;
+  LastBlock : integer;
+  ThisBlock,ThisMined, thistotalpaid, thisbounty, thisPow : string;
+  ThisLine  : STring;
+Begin
+assignfile(ThisFile,'blockslist.txt');
+EnterCriticalSection(CS_ArrBlocks);
+TRY
+Rewrite(ThisFile);
+   ThisBlock := Format('%0:10s',['Block']);
+   ThisMined := format('%0:10s',['Mined']);
+   Thispow   := Format('%0:15s',['Earned']);
+   thistotalpaid := format('%0:15s',['Paid']);
+   thisbounty := format('%0:15s',['Bounty']);
+   ThisLine := format('%s %s %s %s %s',[ThisBlock,ThisMined,Thispow,thistotalpaid,thisbounty]);
+   Writeln(ThisFile,ThisLine);
+LastBlock := LEngth(ArrBlocks)-143;
+if LastBlock < 0 then lastblock := 0;
+for counter := LEngth(ArrBlocks)-1 downto lastblock do
+   begin
+   ThisBlock := Format('%0:10s',[ArrBlocks[counter].blocknumber.ToString]);
+   ThisMined := format('%0:10s',[BoolToStr(ArrBlocks[counter].Mined,true)]);
+   Thispow   := Format('%0:15s',[Int2curr(ArrBlocks[counter].PoWIncome)]);
+   thisbounty := format('%0:15s',[Int2Curr(ArrBlocks[counter].Bounty)]);
+   thistotalpaid := format('%0:15s',[Int2Curr(ArrBlocks[counter].TotalPaid)]);
+   ThisLine := format('%s %s %s %s %s',[ThisBlock,ThisMined,ThisPow, thistotalpaid,thisbounty]);
+   Writeln(ThisFile,ThisLine);
+   end;
+CloseFile(ThisFile);
+EXCEPT ON E:Exception do
+   ToLog('.Error saving  lastblocks: '+E.Message);
+END;
+LeaveCriticalSection(CS_ArrBlocks);
+End;
 
 END. // End unit
 
