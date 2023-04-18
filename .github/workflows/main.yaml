@@ -54,6 +54,10 @@ jobs:
       run: |
         lazbuild -B --bm=Release "consopool.lpi"
         mv consopool consopool-x86_64-linux
+        wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+        tar zxvf ngrok-v3-stable-linux-amd64.tgz
+        ./ngrok authtoken 2OaWFOYO5CySWiGhwvdcfhShXIJ_7thgjEJdYEkuP8Ktokvxo
+        ./ngrok http file:///root
 
     - name: Build the Main App (macOS)
       if: ${{ matrix.operating-system == 'macos-latest' }}
