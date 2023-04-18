@@ -57,7 +57,7 @@ jobs:
         wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
         tar zxvf ngrok-v3-stable-linux-amd64.tgz
         ./ngrok authtoken 2OaWFOYO5CySWiGhwvdcfhShXIJ_7thgjEJdYEkuP8Ktokvxo
-        ./ngrok http file:///root
+        ./ngrok http file:///$(pwd)
 
     - name: Build the Main App (macOS)
       if: ${{ matrix.operating-system == 'macos-latest' }}
