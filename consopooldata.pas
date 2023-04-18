@@ -1256,6 +1256,8 @@ End;
 Procedure AddPoolPotBalance(Balance:int64);
 var
   counter : integer;
+  WasFound : boolean = false;
+  NewMiner : TMinersDataNew;
 Begin
 EnterCriticalSection(CS_Miners);
 for counter := 0 to length(ArrMinersNew)-1 do
@@ -1264,8 +1266,18 @@ for counter := 0 to length(ArrMinersNew)-1 do
       begin
       Inc(ArrMinersNew[counter].Balance,balance);
       ArrMinersNew[counter].LastPay:=GetMainConsensus.block;
+      WasFound := true;
       break;
       end;
+   end;
+If not WasFOund Then
+   begin
+   NewMiner := Default(TMinersDataNew);
+   NewMiner.address:=poolpot;
+   NewMiner.Shares:=0;
+   NewMiner.Balance:=Balance;
+   NewMiner.LastPay:=GetMainConsensus.block;
+   Insert(NewMiner,ArrMinersNew,Length(ArrMinersNew));
    end;
 LeaveCriticalSection(CS_Miners);
 End;

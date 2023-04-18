@@ -1,9 +1,12 @@
-version 0.83
+version 0.90
 
 - New nodes auto update
 - Minstreshold reduced.
 - Multi thread management.
 - Postponed payments to block end.
+- Project jackpot removed.
+- Pool pot implemented.
+- Kill pool implemented.
 
 Version 0.78
 
