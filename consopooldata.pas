@@ -11,6 +11,8 @@ USES
 
 Type
 
+  TLimitStr = String[50];
+
   TBlockRec = packed record
     blocknumber : integer;
     Mined       : boolean;
@@ -40,8 +42,8 @@ Type
     end;
 
    TMinersIPs = Packed Record
-     Address : string;
-     ArrIPs  : array of string;
+     Address : TLimitStr;
+     ArrIPs  : array of TLimitStr;
      end;
 
   ThreadPayment = class(TThread)
@@ -101,6 +103,11 @@ Type
     Block        : integer;
     end;
 
+   TPendingPay = packed record
+    address      : string[40];
+    Balance      : int64;
+    end;
+
    TSourcesArray = Array[0..255] of integer;
 
 
@@ -117,7 +124,8 @@ Procedure CreateBlockzero();
 Procedure createPaymentsFile();
 Procedure CreateVPNfile();
 Procedure LoadVPNFile();
-Procedure SaveVPNFile();
+Procedure SaveVPNFile(ThisArray: array of TVPNIPs);
+Procedure ProcessPEndingCredits();
 Procedure createNodesFile();
 Procedure Createcclassesfile;
 Function GetNodesFileData():String;
@@ -133,6 +141,9 @@ Procedure AddShare(Share:string);
 Function SharesCount():Integer;
 Function ShareAlreadyExists(Share:string):boolean;
 Procedure CreditShare(Address,IPUser:String);
+function GetPoolPotBalance(ClearBalance : boolean = false):int64;
+Procedure AddPoolPotBalance(Balance:int64);
+Procedure SetPoolPotBalance(Balance:int64);
 Function ShareIsValid(Share,Address,MinerProgram,IPUser,CreditAddress, RAWIP:STring):integer;
 
 Procedure SetSolution(Data:TSolution);
@@ -229,6 +240,8 @@ Procedure ResetTorBlocked();
 Function IPTorBlocked(IP:String):boolean;
 // VPN filter
 Function GetVPNBanList():String;
+Function GetDupliaddresses():String;
+Procedure LoadDupAds();
 Procedure ProcessNewVPNs(VPNsList:String);
 Function IncludeVPN(LocIP:String;block:integer):boolean;
 Function VPNIPExists(LocIP:String):boolean;
@@ -255,7 +268,7 @@ Procedure OutputLastDayBlocks();
 
 CONST
   fpcVersion = {$I %FPCVERSION%};
-  AppVersion = 'v0.76b';
+  AppVersion = 'v0.90';
   DefHelpLine= 'Type help for available commands';
   DefWorst = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
   ZipSumaryFilename = 'sumary.zip';
@@ -265,11 +278,13 @@ CONST
   NTPServers        = 'ts2.aco.net:hora.roa.es:time.esa.int:time.stdtime.gov.tw:stratum-1.sjc02.svwh.net:ntp1.sp.se:1.de.pool.ntp.org:';
   VPNsBlocksLife    = 24;
   oneNoso           = 100000000;
+  PoolPot      = 'POOLPOT';
 
   // Predefined Types for OutPut
   uToBoth      = 0;
   uToFile      = 1;
   uToConsole   = 2;
+
 
 
 VAR
@@ -300,6 +315,7 @@ VAR
   FILE_Sumary  : file of SumaryData;
   // New Array of miners IPs
   ARRAY_MinersIPs : Array of TMinersIPs;
+    ARRAY_BAckUPAMI : Array of TMinersIPs; // Works to disitribute payments
   // Config values
   PoolName     : string[15] = 'mypool';
   PoolPort     : integer = 8082;
@@ -314,10 +330,12 @@ VAR
   AutoValue    : integer = 500;
   PoolDonate   : integer = 5;
   AMIPass      : string = 'default';
+  KillPool     : boolean = false;
   // Operative
-  MinTreshold  : int64 = onenoso;
+  MinTreshold  : int64 = 40000000;
   previousNodes: string;
   ThisBlockMNs : boolean = false;
+  ThisBlockDUPS: boolean = false;
   ArraySols    : array of integer;
   ArrayMiner   : array of string;
   ShareIndex   : array[0..15] of integer;
@@ -340,8 +358,9 @@ VAR
   RejectedShares   : integer = 0;
   RestartAfterQuit : boolean = false;
   FileToRestart    : string = '';
-  MaxSharesPerBlock: integer = 3;
-
+  MaxSharesPerBlock: integer = 2;
+  MaxPaysPerBlock  : integer = 50;
+  BannedAddresses  : string = '';
   // Mainnet
   LastConsensusTry : int64   = 0;
   WaitingConsensus :Boolean = false;
@@ -349,6 +368,7 @@ VAR
   MainBestDiff     : String = DefWorst;
   MainnetHashRate  : int64 = 0;
   BlocksMinedByPool: integer = 0;
+  ArrayPendingCredit : Array of TPendingPay;
   // Pool
   PoolBalance      : int64 = 0;
   CheckPaysThreads : Boolean = false;
@@ -365,7 +385,10 @@ VAR
   IPMiners: integer = 100;
   //ArrMiners : Array of TMinersData;
   ArrMinersNew : Array of TMinersDataNew;
-  ArrShares : Array of string;
+  ArrShares : Array of TLimitStr;
+    //Replace ArrShares
+    ThisBlockShares : string = '';
+    ThisBlockSharesCount : integer = 0;
   BlockTargetHash : String = '';
   ThisBlockBest   : String = DefWorst;
   ThisBlockBestAddress : string = '';
@@ -425,19 +448,27 @@ FreeOnTerminate := True;
 End;
 
 procedure ThreadVPNs.Execute;
+var
+  TempDups : string;
 Begin
 if not VPNsThreadRunning then
    begin
    VPNsThreadRunning := true;
-   TRY
-   ToLog(',VPN thread Started!');
-   ProcessNewVPNs(GetVPNBanList);
-   RunVPNClean(GetMainConsensus.block);
-   SaveVPNFile;
-   ToLog(',VPN thread Ended!');
-   EXCEPT ON E:Exception do
-     ToLog(',CRITICAL ThreadVPNs: '+e.Message);
-   END;
+   //ToLog(',VPN thread Started!');
+      TRY
+      ProcessNewVPNs(GetVPNBanList);
+      //RunVPNClean(GetMainConsensus.block);
+      //SaveVPNFile;
+      if length(ArrayPendingCredit)>0 then
+         begin
+         TempDups := GetDupliaddresses;
+         if TempDups <> '' then BannedAddresses := TempDups;
+         ProcessPEndingCredits;
+         end;
+      EXCEPT ON E:Exception do
+        ToLog(',CRITICAL ThreadVPNs: '+e.Message);
+      END;
+   ToLog(',DUPs thread Ended!');
    VPNsThreadRunning := false;
    end;
 End;
@@ -924,23 +955,80 @@ ToLog(' Loaded VPNs: '+IntToStr(length(ARRAy_VPNIPs)));
 LeaveCriticalSection(CS_VPNIPs);
 End;
 
-Procedure SaveVPNFile();
+Procedure SaveVPNFile(ThisArray: array of TVPNIPs);
+var
+  counter  : integer;
+  CSVlist  : string = '';
+  ThisFile : Textfile;
+Begin
+TRY
+rewrite(VPNIPsFile);
+For counter := 0 to length(ThisArray)-1 do
+   begin
+   write(VPNIPsFile,ThisArray[counter]);
+   CSVlist := CSVlist+ThisArray[counter].IP+'.0/24'+',';
+   end;
+CloseFile(VPNIPsFile);
+ToLog(' DUPs SAVED: '+IntToStr(length(ThisArray)));
+EXCEPT ON E:Exception do
+  ToLog('.CRITICAL SaveDuplicated: '+e.Message);
+END;
+Assignfile(thisFile,'duplicated.csv') ;
+TRY
+  Rewrite(ThisFile);
+  writeln(ThisFile,CSVlist);
+  CloseFile(ThisFile);
+  ToLog(' DUPLICATED CSV saved ');
+EXCEPT ON E:Exception do
+  ToLog('.CRITICAL SaveDuplicated CSV: '+e.Message);
+END;
+End;
+
+Function ConfirmPending(Address:string;Amount:int64): int64;
 var
   counter : integer;
 Begin
-EnterCriticalSection(CS_VPNIPs);
-TRY
-rewrite(VPNIPsFile);
-For counter := 0 to length(ARRAy_VPNIPs)-1 do
+Result := 0;
+EnterCriticalSection(CS_Miners);
+for counter := 0 to length(ArrMinersNew)-1 do
    begin
-   write(VPNIPsFile,ARRAy_VPNIPs[counter]);
+   if ArrMinersNew[counter].address = address then
+      begin
+      ArrMinersNew[counter].balance:=ArrMinersNew[counter].balance+Amount;
+      Result := Amount;
+      break;
+      end;
    end;
-CloseFile(VPNIPsFile);
-ToLog(' Saved VPNs: '+IntToStr(length(ARRAy_VPNIPs)));
-EXCEPT ON E:Exception do
-  ToLog('.CRITICAL SaveVPNFile: '+e.Message);
-END;
-LeaveCriticalSection(CS_VPNIPs);
+LEaveCriticalSection(CS_Miners);
+End;
+
+Procedure ProcessPEndingCredits();
+var
+  counter : integer;
+  TotalPAid : int64 = 0;
+  ToJackpot : int64 = 0;
+  Processed : int64;
+  Ignored   : int64 = 0;
+Begin
+for counter := 0 to length(ArrayPendingCredit)-1 do
+   begin
+   if Not AnsiContainsStr(BannedAddresses,ArrayPendingCredit[counter].address) then
+      begin
+      Processed := ConfirmPending(ArrayPendingCredit[counter].address,ArrayPendingCredit[counter].Balance);
+      if Processed > 0 then Inc(TotalPAid,Processed)
+      else Inc (Ignored,Processed);
+      end
+   else
+      begin
+      //CreditFundsToProject(ArrayPendingCredit[counter].Balance);
+      Inc(ToJackpot,ArrayPendingCredit[counter].Balance);
+      end;
+   end;
+SetLEngth(ArrayPendingCredit,0);
+AddPoolPotBalance(ToJackpot);
+ToLog(Format(' Confirmed credited : %s [ %s ] [ %s ]',[Int2curr(TotalPAid),int2curr(ToJackpot),int2curr(Ignored)]));
+ToLog(Format(' Total debt : %s ',[Int2curr(GetTotalDebt)]));
+SaveMiners;
 End;
 
 {$ENDREGION}
@@ -1146,6 +1234,70 @@ LeaveCriticalSection(CS_Miners);
 AddShareIP(IPUser);
 End;
 
+function GetPoolPotBalance(ClearBalance : boolean = false):int64;
+var
+  counter : integer;
+Begin
+Result := 0;
+EnterCriticalSection(CS_Miners);
+for counter := 0 to length(ArrMinersNew)-1 do
+   begin
+   if ArrMinersNew[counter].address = PoolPot then
+      begin
+      result := ArrMinersNew[counter].Balance;
+      if clearbalance then ArrMinersNew[counter].Balance:=0;
+      ArrMinersNew[counter].LastPay:=GetMainConsensus.block;
+      break;
+      end;
+   end;
+LeaveCriticalSection(CS_Miners);
+End;
+
+Procedure AddPoolPotBalance(Balance:int64);
+var
+  counter : integer;
+Begin
+EnterCriticalSection(CS_Miners);
+for counter := 0 to length(ArrMinersNew)-1 do
+   begin
+   if ArrMinersNew[counter].address = PoolPot then
+      begin
+      Inc(ArrMinersNew[counter].Balance,balance);
+      ArrMinersNew[counter].LastPay:=GetMainConsensus.block;
+      break;
+      end;
+   end;
+LeaveCriticalSection(CS_Miners);
+End;
+
+Procedure SetPoolPotBalance(Balance:int64);
+var
+  counter  : integer;
+  WasFound : boolean = false;
+  NewMiner : TMinersDataNew;
+Begin
+EnterCriticalSection(CS_Miners);
+for counter := 0 to length(ArrMinersNew)-1 do
+   begin
+   if ArrMinersNew[counter].address = PoolPot then
+      begin
+      ArrMinersNew[counter].Balance := balance;
+      WasFound := true;
+      break;
+      end;
+   end;
+If not WasFOund Then
+   begin
+   NewMiner := Default(TMinersDataNew);
+   NewMiner.address:=poolpot;
+   NewMiner.Shares:=0;
+   NewMiner.Balance:=Balance;
+   NewMiner.LastPay:=GetMainConsensus.block;
+   Insert(NewMiner,ArrMinersNew,Length(ArrMinersNew));
+   end;
+LeaveCriticalSection(CS_Miners);
+End;
+
 {$ENDREGION}
 
 {$REGION Block shares management}
@@ -1170,7 +1322,8 @@ End;
 Procedure AddShare(Share:string);
 Begin
 EnterCriticalSection(CS_Shares);
-insert(share,ArrShares,length(ArrShares));
+SetLength(ArrShares, length(ArrShares)+1);
+ArrShares[LEngth(ArrShares)-1] := Share;
 LeaveCriticalSection(CS_Shares);
 End;
 
@@ -1207,10 +1360,10 @@ if not IpTorAllowed(RAWIP) then
       AddTorAllowed(RAWIP);
       end;
    end;
-if VPNIPExists(RAWIP) then
+if VPNIPExists(IPUser) then
    begin
    Inc(VPNCOunt);
-   Result := 12;
+   Result := -1;
    exit;
    end;
 if ShareAlreadyExists(Share) then
@@ -1386,6 +1539,7 @@ writeln(configfile,'autodiff '+BoolToStr(AutoDiff,True));
 writeln(configfile,'autovalue '+IntToStr(AutoValue));
 writeln(configfile,'donate '+PoolDonate.ToString);
 writeln(configfile,'amipass '+AMIPass);
+writeln(configfile,'killpool '+BoolToStr(killpool,True));
 
 CloseFile(configfile);
 EXCEPT ON E:EXCEPTION do
@@ -1425,6 +1579,7 @@ while not eof(configfile) do
    if uppercase(Parameter(linea,0)) = 'AUTOVALUE' then AutoValue := StrToIntDef(Parameter(linea,1),AutoValue);
    if uppercase(Parameter(linea,0)) = 'DONATE' then PoolDonate := StrToIntDef(Parameter(linea,1),PoolDonate);
    if uppercase(Parameter(linea,0)) = 'AMIPASS' then AMIPass := Parameter(linea,1);
+   if uppercase(Parameter(linea,0)) = 'KILLPOOL' then KillPool := StrToBool(Parameter(linea,1));
    if PoolDonate>99 then PoolDonate := 99;
    end;
 EXCEPT ON E:EXCEPTION do
@@ -1651,13 +1806,20 @@ var
   Earned        : int64;
   BaseReward    : int64;
   DonationAmount: int64 = 0;
+  TotalPending  : int64 = 0;
+  FromPot       : int64 = 0;
 Begin
 Result := '';
 BaseReward := GetMainConsensus.LBPoW;
 ToDistribute := BaseReward;
 Comision := (ToDistribute * PoolFee) div 10000;
 ToDistribute := ToDistribute - Comision;
+FromPot := GetPoolPotBalance;
+ToDistribute := ToDistribute + fromPot;
 EnterCriticalSection(CS_Miners);
+Setlength(ArrayPendingCredit,0);
+Setlength(ArrayPendingCredit,1);
+ArrayPendingCredit[0].Balance := GetMainConsensus.block;
 For counter := 0 to length(ArrMinersNew)-1 do
    TotalShares := TotalShares+ArrMinersNew[counter].Shares;
 PerShare := ToDistribute div TotalShares;
@@ -1665,11 +1827,17 @@ For counter := 0 to length(ArrMinersNew)-1 do
    begin
    if ArrMinersNew[counter].Shares>0 then
       begin
-      ArrMinersNew[counter].Balance:=ArrMinersNew[counter].Balance+((ArrMinersNew[counter].Shares * PerShare));
+      //ArrMinersNew[counter].Balance:=ArrMinersNew[counter].Balance+((ArrMinersNew[counter].Shares * PerShare));
+      Setlength(ArrayPendingCredit,length(ArrayPendingCredit)+1);
+      ArrayPendingCredit[length(ArrayPendingCredit)-1].address:=ArrMinersNew[counter].address;
+      ArrayPendingCredit[length(ArrayPendingCredit)-1].Balance:=ArrMinersNew[counter].Shares * PerShare;
+      Inc(TotalPending,ArrMinersNew[counter].Shares * PerShare);
       ArrMinersNew[counter].Shares := 0;
       end;
    end;
 LeaveCriticalSection(CS_Miners);
+ToLog(Format(' Total pending: %s [Pot: %s]',[int2curr(TotalPending),int2curr(frompot)]));
+SetPoolPotBalance(0);
 Earned := GetMainConsensus.LBPoW-(PerShare*TotalShares);
 if PoolDonate>0 then
    begin
@@ -1703,7 +1871,7 @@ CopyArray := copy(ArrMinersNew,0,length(ArrMinersNew));
 LeaveCriticalSection(CS_Miners);
 For counter := 0 to length(CopyArray)-1 do
    begin
-   if ((CopyArray[counter].Balance>onenoso)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and
+   if ((CopyArray[counter].Balance>MinTresHold)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and
        (CopyArray[counter].address<>PoolAddress) )then
       begin
       Inc(PayingAddresses);
@@ -1714,15 +1882,17 @@ For counter := 0 to length(CopyArray)-1 do
       ThisThread.Start;
       IncreasePaythread(CopyArray[counter].address,CopyArray[counter].Balance);
       Inc(ThisBlockPays);
-      if ThisBlockPays >= 30 then break;
+      if ThisBlockPays >= MaxPaysPerBlock then break;
       sleep(1);
       end;
-   if ((CopyArray[counter].Balance<onenoso)and(CopyArray[counter].LastPay+1008<= ThisBlock)and
-       (CopyArray[counter].address<>PoolAddress) and (CopyArray[counter].address<>ProjectAddress) )then
+   if ((CopyArray[counter].Balance<MinTresHold)and(CopyArray[counter].LastPay+1008<= ThisBlock)and
+       (CopyArray[counter].address<>PoolAddress) and
+       (CopyArray[counter].address<>ProjectAddress) )then
       begin
       ToProject := CopyArray[counter].Balance;
-      ClearAddressBalance(CopyArray[counter].address,ThisBlock.ToString+':'+CopyArray[counter].Balance.ToString+':'+'OwnPayment');
-      CreditFundsToProject(ToProject);
+      ClearAddressBalance(CopyArray[counter].address,ThisBlock.ToString+':'+
+         CopyArray[counter].Balance.ToString+':'+'Expired');
+      AddPoolPotBalance(ToProject);
       Inc(TotalProject,ToProject);
       end;
    if ((CopyArray[counter].Balance>0)and(CopyArray[counter].LastPay+poolpay<= ThisBlock)and(CopyArray[counter].address=PoolAddress) )then
@@ -1744,7 +1914,7 @@ else
    //UpdatePoolBalance;
    end;
 if TotalProject >0 then
-   ToLog(Format(' Credited to jackpot : %s',[Int2Curr(TotalProject)]));
+   ToLog(Format(',Expired to Pool pot : %s',[Int2Curr(TotalProject)]));
 End;
 
 Procedure RunVerification();
@@ -2003,7 +2173,9 @@ TRY
       WriteLn(Blockfile,format('PerShare   : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,0),0))]));
       WriteLn(Blockfile,format('Earned     : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,1),0))]));
       WriteLn(Blockfile,format('Donated    : %s',[Int2Curr(StrToIntDef(Parameter(Distribute,3),0))]));
+      ToLog(' ********************');
       ToLog('.Block mined: '+number.ToString);
+      ToLog(' ********************');
       end;
    CloseFile(BlockFile);
    ToLog(Format(' Created block : %s [Debt: %s]',[number.ToString,Int2Curr(GetTotalDebt)]))
@@ -2024,6 +2196,7 @@ Procedure ResetBlock();
 var
   BlockDataNew : TBlockRec;
 Begin
+GetPoolPotBalance;
 MainBestDiff := DefWorst;
 if GetMainConsensus.block > GetMyLastUpdatedBlock then
    begin
@@ -2058,7 +2231,7 @@ VPNCount := 0;
 CCBlocked := 0;
 ResetTorAllowed;
 ResetTorBlocked;
-RunVPNsThread;
+//{if GetMainConsensus.block mod 6 = 0 then }RunVPNsThread;
 BlockDataNew := Default(TBlockRec);
 BlockDataNew.blocknumber:=GetMainConsensus.block;
 BlockDataNEw.Mined:=GetMainConsensus.LBMiner = PoolAddress;
@@ -2074,6 +2247,7 @@ ToLog(',Sources output completed');
 //ProcessNewVPNs(GetVPNBanList);
 //RunVPNClean(GetMainConsensus.block);
 //SaveVPNFile;
+ThisBlockDUPS := false;
 End;
 
 Procedure RunVPNsThread;
@@ -2083,6 +2257,7 @@ Begin
 ThisThread := ThreadVPNs.create(true);
 ThisThread.FreeOnTerminate:=true;
 ThisThread.Start;
+Sleep(20);
 End;
 
 Function GetPrefixIndex():Integer;
@@ -2181,6 +2356,11 @@ Begin
 RawIP := AContext.Connection.Socket.Binding.PeerIP;
 IPUser := GetIpFiltered(RawIP);
 Linea := '';
+if VPNIPExists(IPUSer) then
+   begin
+   TryClosePoolConnection(AContext);
+   Inc(VPNCOunt);
+   end;
 TRY
 Linea := AContext.Connection.IOHandler.ReadLn('',3000,-1,IndyTextEncoding_UTF8);
 EXCEPT On E:Exception do
@@ -2201,7 +2381,7 @@ TRY
 If UpperCase(Command) = 'SOURCE' then
    begin
    AddUserMiner(Parameter(Linea,2));
-   AddNewRecord(Address,Parameter(Linea,3),RawIP,GetMainConsensus.block);
+   //AddNewRecord(Address,Parameter(Linea,3),RawIP,GetMainConsensus.block);
    //AddUserIP(IPUser);
    if ( (not IsValidHashAddress(Address)) or (address = '') ) then
       begin
@@ -2265,11 +2445,11 @@ else If UpperCase(Command) = 'SHARE' then
       AddToAmi(Address,AContext.Connection.Socket.Binding.PeerIP);
       TryClosePoolConnection(AContext,'True');
       end
-   else
+   else if ValidShareValue>0 then
       begin
-      TryClosePoolConnection(AContext,'False '+ValidShareValue.ToString);
-
+      TryClosePoolConnection(AContext,'False '+ValidShareValue.ToString)
       end
+   else TryClosePoolConnection(AContext)
    end
 else If UpperCase(Command) = 'POOLINFO' then
    begin
@@ -2891,6 +3071,8 @@ Procedure ClearAMI();
 Begin
 EnterCriticalSection(CS_ArrayMinersIPS);
 TRY
+SetLength(ARRAY_BAckUPAMI,0);
+ARRAY_BAckUPAMI := copy(ARRAY_MinersIPs,0,length(ARRAY_MinersIPs));
 SetLength(ARRAY_MinersIPs,0);
 EXCEPT ON E:Exception do
 
@@ -3170,10 +3352,10 @@ Conector := TFPHttpClient.Create(nil);
 conector.ConnectTimeout:=3000;
 conector.IOTimeout:=3000;
    TRY
-   readedLine := Conector.SimpleGet('http://nosostats.ddns.net:49001/api/banList1');
+   readedLine := Conector.SimpleGet('http://iscal.ddns.net:49001/api/banList1');
    EXCEPT on E: Exception do
    begin
-   ToLog(' Error: '+E.Message);
+   ToLog(' Error GetVPNBanList: '+E.Message);
    end;
    END;//TRY
 if readedline <> '' then
@@ -3186,7 +3368,72 @@ if readedline <> '' then
    end;
 Result := readedline;
 Conector.Free;
-ToLog(Format('.VPNs download time: %d ms',[GetTickCount64-InitTime]));
+ToLog(Format('.DUPs download time: %d ms',[GetTickCount64-InitTime]));
+End;
+
+Procedure SaveDupAds();
+var
+  ThisFile : textfile;
+Begin
+AssignFile(ThisFile,'dupads.text');
+  TRY
+  Rewrite(ThisFile);
+  writeln(ThisFile,BannedAddresses);
+  Closefile(ThisFile);
+  EXCEPT on E: Exception do
+    begin
+
+    end;
+
+  END;
+End;
+
+Procedure LoadDupAds();
+var
+  ThisFile : textfile;
+Begin
+AssignFile(ThisFile,'dupads.text');
+  TRY
+  Reset(ThisFile);
+  Readln(ThisFile,BannedAddresses);
+  Closefile(ThisFile);
+  EXCEPT on E: Exception do
+    begin
+
+   end;
+END;
+End;
+
+Function GetDupliaddresses():String;
+var
+  readedLine : string = '';
+  Conector : TFPHttpClient;
+  InitTime  : int64;
+Begin
+Result := '';
+InitTime := GetTickCount64;
+Conector := TFPHttpClient.Create(nil);
+conector.ConnectTimeout:=3000;
+conector.IOTimeout:=3000;
+   TRY
+   readedLine := Conector.SimpleGet('http://iscal.ddns.net:49001/api/banAddresses1');
+   EXCEPT on E: Exception do
+   begin
+   ToLog(' Error GetDupliaddresses: '+E.Message);
+   end;
+   END;//TRY
+if readedline <> '' then
+   begin
+   //ReadedLine := StringReplace(ReadedLine,'[','',[rfReplaceAll, rfIgnoreCase]);
+   //ReadedLine := StringReplace(ReadedLine,']','',[rfReplaceAll, rfIgnoreCase]);
+   //ReadedLine := StringReplace(ReadedLine,'"','',[rfReplaceAll, rfIgnoreCase]);
+   //ReadedLine := StringReplace(ReadedLine,',',' ',[rfReplaceAll, rfIgnoreCase]);
+   //readedline := Trim(ReadedLine);
+   SaveDupAds;
+   end;
+Result := readedline;
+Conector.Free;
+//ToLog(Format('.BannedAddresses download time: %d ms',[GetTickCount64-InitTime]));
 End;
 
 Procedure ProcessNewVPNs(VPNsList:String);
@@ -3196,20 +3443,38 @@ var
   Included  : Integer = 0;
   Processed : integer = 0;
   InitTime  : int64;
+  NewData       : TVPNIps;
+  TEMP_ARRAY  : Array of TVPNIPs;
+  ThisBlock : integer;
 Begin
 InitTime := GetTickCount64;
+if VPNsList = '' then exit;
+
+SetLEngth(TEMP_ARRAY,0);
+ThisBlock := GetMainConsensus.block;
 Repeat
    ThisIP := Parameter(VPNsList,counter);
    if ThisIP <> '' then
       begin
-      if IncludeVPN(ThisIP,GetMainConsensus.block) then Inc(Included);
+      NewData.IP    := ThisIP;
+      NewData.Block := ThisBlock;
+      Insert(NewData,TEMP_ARRAY,length(TEMP_ARRAY));
+      //if IncludeVPN(ThisIP,GetMainConsensus.block) then Inc(Included);
       Inc(Processed);
       end;
    Inc(Counter);
 until ThisIP = '';
-ToLog(Format(',VPNs Process time: %d ms',[GetTickCount64-InitTime]));
-ToLog(' VPNs procecessed: '+Processed.ToString);
-If Included > 0 then ToLog('.New VPN IPs: '+Included.ToString);
+ToLog(Format(',DUPs Process time: %d ms',[GetTickCount64-InitTime]));
+InitTime := GetTickCount64;
+EnterCriticalSection(CS_VPNIPs);
+SetLEngth(ARRAY_VPNIPs,0);
+ARRAY_VPNIPs:= copy(TEMP_ARRAY,0,length(TEMP_ARRAY));
+LEaveCriticalSection(CS_VPNIPs);
+ToLog(Format(',DUPs copy time: %d ms',[GetTickCount64-InitTime]));
+SaveVPNFile(TEMP_ARRAY);
+
+//ToLog(' VPNs procecessed: '+Processed.ToString);
+//If Included > 0 then ToLog('.New VPN IPs: '+Included.ToString);
 End;
 
 Function IncludeVPN(LocIP:String;block:integer):boolean;
@@ -3220,22 +3485,10 @@ var
 Begin
 Result := false;
 EnterCriticalSection(CS_VPNIPs);
-for counter := 0 to length(ARRAy_VPNIPs)-1 do
-   begin
-   if ARRAy_VPNIPs[counter].IP=LocIP then
-      begin
-      ARRAy_VPNIPs[counter].Block:=block;
-      AlreadyExists := true;
-      break;
-      end;
-   end;
-If not AlreadyExists then
-   begin
-   NewData.IP    := LocIP;
-   NewData.Block := Block;
-   Insert(NewData,ARRAy_VPNIPs,length(ARRAy_VPNIPs));
-   Result := true;
-   end;
+NewData.IP    := LocIP;
+NewData.Block := Block;
+Insert(NewData,ARRAy_VPNIPs,length(ARRAy_VPNIPs));
+Result := true;
 LEaveCriticalSection(CS_VPNIPs);
 End;
 

@@ -33,4 +33,7 @@ sh
 *.res
 *.lps
 *.mo
+blockslist.dat
+blockslist.txt
+duplicated.csv
 

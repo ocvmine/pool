@@ -109,7 +109,7 @@ if number = 5 then
 if number = 6 then
    begin
    Textcolor(white);TextBackground(Black);
-   write(Format(' %s  %d  %d[%d] %s [%s] [%d] [PT:%d][TOR:%d][VPN:%d]',
+   write(Format(' %s  %d  %d[%d] %s [%s] [%d] [PT:%d][TOR:%d][DUP:%d]',
    [UpTime,SESSION_BestHashes, SESSION_Shares, RejectedShares, 'NULL',
    HashrateToShow(MainNetHashRate),BlocksMinedByPool,GetPayThreads,TorCount,VPNCount]));
    PrintLine(7);
@@ -423,6 +423,7 @@ SetLength(ARRAY_Sumary,0);
 SetLength(ARRAY_MinersIPs,0);
 SetLength(ARRAy_VPNIPs,0);
 SetLength(ArrBlocks,0);
+SetLength(ArrayPendingCredit,0);
 ResetArraySources;
 SLTor := TStringlist.Create;
 
@@ -438,6 +439,7 @@ Assignfile(configfile, 'consopool.cfg');
 Assignfile(logfile, 'logs'+DirectorySeparator+'log.txt');
 Assignfile(OldLogFile, 'logs'+DirectorySeparator+'oldlogs.txt');
 Assignfile(VPNIPsFile,'vpns.dat');
+Assignfile(PaysFile,'payments.txt');
 
 // Migrate the old miners data file
 if fileExists('miners'+DirectorySeparator+'miners.dat') then MigrateMinersFile();
@@ -449,7 +451,6 @@ if not fileExists('frequency.dat') then SaveShareIndex;
 if not fileExists('vpns.dat') then CreateVPNfile;
 if not fileExists('cclasses.dat') then Createcclassesfile;
 if StoreShares then LoadShareIndex;
-Assignfile(PaysFile,'payments.txt');
 if not FileExists('miners'+DirectorySeparator+'minersnew.dat') then CreateMinersFile();
 LoadMiners();
 If not ResetLogs then
@@ -464,13 +465,13 @@ LoadVPNFile;
 writeln('VPN file loaded');
 LoadNodes(GetNodesFileData());
 writeln('Nodes loaded');
-LoadCClasses;
+//LoadCClasses;
 LoadSourcesFromDisk;
 LoadArrBlocksFromDisk();
+LoadDupAds;
 InitServer;
 writeln('TCP server initialized');
 ClrScr;
-
 if PoolAddress='' then CloseTheApp('Pool address is empty');
 if PublicKey  ='' then CloseTheApp('Public key is empty');
 if PrivateKey  ='' then CloseTheApp('Private key is empty');
@@ -486,6 +487,11 @@ RunVPNSThread;
 //ProcessNewVPNs(GetVPNBanList);
 //SaveVPNFile;
 ToLog(' ********** New Session **********');
+if KillPool then
+   begin
+   MinTresHold := MinTresHold div 5;
+   ToLog(' Pool is set to dissapear');
+   end;
 if PoolAuto then PrintLine(8,StartPool);
 DrawPanelBorders;
 REPEAT
@@ -526,23 +532,37 @@ REPEAT
          begin
             PrintLine(3);
          end;
-      if ( (MainConsensus.LBTimeEnd >= 300) and (MainConsensus.LBTimeEnd < 585)and (not ThisBlockMNs) ) then
+      if ( (UTCTime-MainConsensus.LBTimeEnd>300) and (1=1) and (not ThisBlockMNs) ) then
          begin
-         MNsTextDown := GetMNsFromNode;
+         MNsTextDown := GetCFGFromNode;
+         if ( (Parameter(MNsTextDown,1) <> ActiveNodesStr) and (MNsTextDown<>'') ) then
+            begin
+            SaveMnsToDisk(Parameter(MNsTextDown,1));
+            LoadNodes(Parameter(MNsTextDown,1));
+            ToLog(' New nodes saved');
+            end
+         else ToLog(' Nodes ok');
+         {
          if Copy(HashMD5String(MNsTextDown+#13#10),0,5) = GetMainConsensus.MNsHash then
             begin
             if SaveMnsToDisk(MNsTextDown) then
                begin
                LoadNodes(GetNodesFileData());
                ToLog(Format(' Nodes updated: %d Verificators',[length(NodesArray)]));
-               ThisBlockMNs := true;
                end;
             end
          else
             begin
             ToLog(Format(' Wrong MNs Hash: %s <> %s',[Copy(HashMD5String(MNsTextDown),0,5),GetMainConsensus.MNsHash]));
-            ThisBlockMNs := true;
             end;
+         }
+         ThisBlockMNs := true;
+         end;
+      if ( (UTCTime-MainConsensus.LBTimeEnd>400) and (Not VPNsThreadRunning) and (ThisBlockDUPS = false)) then
+         begin
+         ToLog(' Starting DUPs thread');
+         ThisBlockDUPS := true;
+         RunVPNsThread;
          end;
       if RefreshAge<> UTCTime then
          begin
@@ -666,6 +686,7 @@ REPEAT
          RestartAfterQuit := true;
          FinishProgram := true;
          end
+      else if Uppercase(Parameter(Command,0)) = 'DUPADDS' then  Tolog('.Baned VPNS: '+GetDupliaddresses)
       else if Uppercase(Parameter(Command,0)) = 'VPNS' then Tolog('.Baned VPNS: '+GetVPNBanList)
       else if Uppercase(Parameter(Command,0)) = 'ISVPN' then Tolog('.Ip '+Parameter(Command,1)+' is VPN : '+BoolToStr(VPNIPExists(Parameter(Command,1)),true))
        else if Uppercase(Parameter(Command,0)) = 'EXPORTVPNS' then ExportVPNs()
